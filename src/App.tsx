@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Chat from './components/Chat';
 import DynamicComponent from './components/DynamicComponent';
 import { LLMConfig } from './types';
-import * as Babel from '@babel/standalone';
+import { LLMService } from './services/llm';
 
 const DEFAULT_CONFIG: LLMConfig = {
   baseUrl: 'http://localhost:8080',
@@ -12,22 +12,11 @@ const DEFAULT_CONFIG: LLMConfig = {
   maxTokens: 2000,
 };
 
-interface GroqModel {
-  id: string;
-  object: string;
-  created: number;
-  owned_by: string;
-}
-
-const DYNAMIC_COMPONENT_CODE_KEY = 'pathweaver_dynamic_component_code';
-
 function App() {
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const [dynamicComponentCode, setDynamicComponentCode] = useState<string | null>(null);
-  const [availableModels, setAvailableModels] = useState<GroqModel[]>([]);
-  const [recommendedModel, setRecommendedModel] = useState<string>('llama-3.1-8b-instant');
+  const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
 
   // Load config from localStorage
   useEffect(() => {
@@ -40,30 +29,9 @@ function App() {
       }
     }
     
-    // Fetch available models
-    fetchAvailableModels();
+    // Set up rate limit callback
+    LLMService.setRateLimitCallback(setRateLimitCountdown);
   }, []);
-
-  // Fetch available models from server
-  const fetchAvailableModels = async () => {
-    console.log('🔍 Fetching available models...');
-    try {
-      const response = await fetch('http://localhost:8080/api/models');
-      console.log('📡 Models API response status:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('✅ Received models data:', data);
-        setAvailableModels(data.models);
-        setRecommendedModel(data.recommended);
-      } else {
-        const errorText = await response.text();
-        console.error('❌ Failed to fetch models:', response.status, errorText);
-      }
-    } catch (error) {
-      console.error('💥 Failed to fetch models:', error);
-    }
-  };
 
   // Handle dynamic component updates
   const handleDynamicComponentUpdate = (code: string) => {
@@ -86,6 +54,12 @@ function App() {
   // Start the game
   const handleStartGame = () => {
     setGameStarted(true);
+    // Automatically send initial message to start the adventure
+    setTimeout(() => {
+      if (chatRef.current) {
+        chatRef.current.sendEventMessage("Hello! I'd like to start a new adventure.");
+      }
+    }, 100);
   };
 
   return (
@@ -100,17 +74,29 @@ function App() {
               <p className="text-gray-600 text-sm">Interactive AI Storytelling</p>
             </div>
           </div>
-          <button
-            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-            className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-            title="Settings"
-          >
-            ⚙️
-          </button>
+          
+          {/* Loading indicator or rate limit countdown */}
+          {gameStarted && (
+            <>
+              {rateLimitCountdown > 0 ? (
+                <div className="flex items-center space-x-2 text-orange-600">
+                  <div className="animate-pulse rounded-full h-4 w-4 bg-orange-600"></div>
+                  <span className="text-sm">
+                    Rate limited, retrying in {Math.floor(rateLimitCountdown / 60)}m {rateLimitCountdown % 60}s...
+                  </span>
+                </div>
+              ) : chatRef.current?.isLoading && (
+                <div className="flex items-center space-x-2 text-blue-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <span className="text-sm">Thinking...</span>
+                </div>
+              )}
+            </>
+          )}
         </header>
 
-        <main className="flex-1 flex min-h-0">
-          {/* Dynamic Component Area - Takes up most space */}
+        <main className="flex-1 flex flex-col min-h-0">
+          {/* Dynamic Component Area - Takes full space */}
           <div className="flex-1 min-h-0">
             {!gameStarted ? (
               <div className="flex-1 h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
@@ -135,107 +121,14 @@ function App() {
             )}
           </div>
 
-          {/* Chat Sidebar - Only show when game started */}
+          {/* Message Input - Fixed at bottom */}
           {gameStarted && (
-            <div className="w-96 border-l bg-white flex flex-col">
-              <div className="flex-1 min-h-0">
-                <Chat 
-                  ref={chatRef}
-                  config={config} 
-                  onDynamicComponentUpdate={handleDynamicComponentUpdate}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Settings Sidebar */}
-          {isSettingsOpen && (
-            <div className="w-80 border-l bg-white flex flex-col">
-              <div className="p-4 border-b">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-lg font-semibold">Settings</h2>
-                  <button
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-              
-              <div className="flex-1 p-4 space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    AI Model
-                  </label>
-                  <select
-                    value={config.model}
-                    onChange={(e) => {
-                      const newConfig = { ...config, model: e.target.value };
-                      setConfig(newConfig);
-                      localStorage.setItem('pathweaver-config', JSON.stringify(newConfig));
-                    }}
-                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    {availableModels.length > 0 ? (
-                      availableModels.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.id} {model.id === recommendedModel ? '(Recommended)' : ''}
-                        </option>
-                      ))
-                    ) : (
-                      <option value={config.model}>{config.model} (Loading models...)</option>
-                    )}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Choose the AI model for your adventure
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Temperature: {config.temperature}
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={config.temperature}
-                    onChange={(e) => {
-                      const newConfig = { ...config, temperature: parseFloat(e.target.value) };
-                      setConfig(newConfig);
-                      localStorage.setItem('pathweaver-config', JSON.stringify(newConfig));
-                    }}
-                    className="w-full"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Higher = more creative, Lower = more focused
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Max Tokens
-                  </label>
-                  <input
-                    type="number"
-                    min="100"
-                    max="4000"
-                    step="100"
-                    value={config.maxTokens}
-                    onChange={(e) => {
-                      const newConfig = { ...config, maxTokens: parseInt(e.target.value) };
-                      setConfig(newConfig);
-                      localStorage.setItem('pathweaver-config', JSON.stringify(newConfig));
-                    }}
-                    className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Maximum response length
-                  </p>
-                </div>
-              </div>
+            <div className="border-t bg-white p-4">
+              <Chat 
+                ref={chatRef}
+                config={config} 
+                onDynamicComponentUpdate={handleDynamicComponentUpdate}
+              />
             </div>
           )}
         </main>

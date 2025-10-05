@@ -43,7 +43,8 @@ if (!LLM_API_KEY) {
 
 app.use(cors({
   origin: [
-    'http://localhost:5173',
+    'http://localhost:5173',  // Vite dev server (default)
+    'http://localhost:5174',  // Vite dev server (alternate port)
     'http://localhost:3000', 
     'https://pathweaver-storytelling-0cc048134931.herokuapp.com'
   ],
@@ -151,18 +152,30 @@ io.on('connection', (socket) => {
                 args = JSON.parse(toolCall.function.arguments);
               } catch (parseError) {
                 console.log('Initial JSON parse failed, attempting to repair:', parseError.message);
-                // Try to repair common JSON issues in JSX code
+                console.log('Original args preview:', toolCall.function.arguments.substring(0, 100) + '...');
+                
+                // More targeted JSON repair - only fix unescaped quotes in content
                 let repairedArgs = toolCall.function.arguments
-                  .replace(/\\n/g, '\\\\n')  // Escape newlines
-                  .replace(/\\"/g, '\\\\"')  // Escape quotes
-                  .replace(/'/g, "\\'");     // Escape single quotes
+                  // Fix unescaped single quotes in text content (but not in code)
+                  .replace(/([^\\])'([^s])/g, "$1\\'$2")  // Don't escape 's contractions
+                  .replace(/([^\\])'s /g, "$1\\'s ")      // Fix 's contractions specifically
+                  .replace(/\\n/g, '\\\\n');              // Escape newlines
+                
+                console.log('Repaired args preview:', repairedArgs.substring(0, 100) + '...');
                 
                 try {
                   args = JSON.parse(repairedArgs);
                   console.log('JSON repair successful');
                 } catch (repairError) {
                   console.error('JSON repair failed:', repairError.message);
-                  console.error('Original arguments:', toolCall.function.arguments);
+                  console.error('Sending error back to LLM for retry...');
+                  
+                  // Send error back to LLM so it can retry with simpler approach
+                  socket.emit('chat_error', { 
+                    error: 'Tool use failed due to JSON formatting',
+                    details: `The generated JSX code contains characters that break JSON encoding. Please simplify the component and avoid complex text with quotes or special characters. Error: ${repairError.message}`,
+                    retry: true
+                  });
                   return;
                 }
               }

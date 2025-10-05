@@ -5,11 +5,10 @@
   "type": "module",
   "description": "Interactive AI storytelling adventure game powered by Groq",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"vite --port 5173\" \"cd server && npm run dev\"",
     "build": "vite build",
     "preview": "vite preview",
     "server": "cd server && npm run dev",
-    "dev:full": "concurrently \"npm run dev\" \"npm run server\"",
     "start": "cd server && npm start",
     "heroku-postbuild": "npm run build:all",
     "build:all": "cd server && npm install && cd .. && npm install && npm run build"

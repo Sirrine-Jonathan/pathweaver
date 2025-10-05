@@ -128,15 +128,46 @@ const TOOL_DEFINITIONS = [
 export class LLMService {
   private static socket: Socket | null = null;
   private static conversationHistory: ChatMessage[] = [];
+  private static rateLimitCallback: ((seconds: number) => void) | null = null;
 
   private static getSocket(): Socket {
     if (!this.socket) {
-      // Use current domain for WebSocket connection
-      const socketUrl = window.location.origin;
+      // Use backend server URL for development, current domain for production
+      const socketUrl = process.env.NODE_ENV === 'production' 
+        ? window.location.origin 
+        : 'http://localhost:8080';
       console.log('Connecting to WebSocket at:', socketUrl);
       this.socket = io(socketUrl);
     }
     return this.socket;
+  }
+
+  private static handleRateLimit(seconds: number, retryCallback: () => void) {
+    let countdown = seconds;
+    
+    // Notify UI about rate limit
+    if (this.rateLimitCallback) {
+      this.rateLimitCallback(countdown);
+    }
+    
+    const timer = setInterval(() => {
+      countdown--;
+      if (this.rateLimitCallback) {
+        this.rateLimitCallback(countdown);
+      }
+      
+      if (countdown <= 0) {
+        clearInterval(timer);
+        if (this.rateLimitCallback) {
+          this.rateLimitCallback(0); // Clear countdown
+        }
+        retryCallback();
+      }
+    }, 1000);
+  }
+
+  static setRateLimitCallback(callback: (seconds: number) => void) {
+    this.rateLimitCallback = callback;
   }
 
   private static addToHistory(message: ChatMessage) {
@@ -153,8 +184,14 @@ export class LLMService {
     config: LLMConfig,
     onDynamicComponentUpdate?: (code: string) => void
   ): Promise<string> {
+    console.log('LLMService.generateResponse called with:', { 
+      messagesCount: messages.length, 
+      config: { ...config, apiKey: '[REDACTED]' }
+    });
+
     return new Promise((resolve, reject) => {
       const socket = this.getSocket();
+      console.log('Socket obtained, setting up listeners...');
 
       // Add new user message to history
       const userMessage = messages[messages.length - 1];
@@ -165,6 +202,12 @@ export class LLMService {
         { role: 'system', content: GAME_MASTER_PROMPT },
         ...this.conversationHistory
       ];
+
+      console.log('Full conversation built:', {
+        systemPrompt: !!GAME_MASTER_PROMPT,
+        historyCount: this.conversationHistory.length,
+        totalMessages: fullMessages.length
+      });
 
       // Set up event listeners
       const handleResponse = (data: any) => {
@@ -189,6 +232,74 @@ export class LLMService {
 
       const handleError = (error: any) => {
         console.error('Chat error:', error);
+        
+        // Check for rate limit error - look for both the code and the retry time
+        if (error.details && (error.details.includes('rate_limit_exceeded') || error.details.includes('Rate limit reached'))) {
+          // Extract retry time from error message - handle both seconds and minutes
+          let retrySeconds = 0;
+          
+          // Try to match minutes and seconds format: "15m3.939999999s"
+          const minutesMatch = error.details.match(/Please try again in (\d+)m([\d.]+)s/);
+          if (minutesMatch) {
+            const minutes = parseInt(minutesMatch[1]);
+            const seconds = parseFloat(minutesMatch[2]);
+            retrySeconds = Math.ceil(minutes * 60 + seconds);
+          } else {
+            // Try to match seconds only format: "4.765s"
+            const secondsMatch = error.details.match(/Please try again in ([\d.]+)s/);
+            if (secondsMatch) {
+              retrySeconds = Math.ceil(parseFloat(secondsMatch[1]));
+            }
+          }
+          
+          if (retrySeconds > 0) {
+            console.log(`Rate limited, retrying in ${retrySeconds} seconds (${Math.floor(retrySeconds/60)}m ${retrySeconds%60}s)...`);
+            
+            // Start countdown and auto-retry
+            this.handleRateLimit(retrySeconds, () => {
+              // Retry the same request
+              const retryMessages = [
+                { role: 'system', content: GAME_MASTER_PROMPT },
+                ...this.conversationHistory
+              ];
+              
+              socket.emit('chat_request', {
+                messages: retryMessages,
+                model: config.model,
+                tools: TOOL_DEFINITIONS,
+                tool_choice: 'auto'
+              });
+            });
+            return; // Don't reject, let the retry handle it
+          }
+        }
+        
+        // If it's a retry error, automatically send feedback to LLM
+        if (error.retry) {
+          console.log('Retrying with error feedback...');
+          // Add error feedback to conversation and retry
+          this.addToHistory({
+            id: Date.now().toString(),
+            role: 'system',
+            content: `Error: ${error.details}. Please retry with a simpler approach.`,
+            timestamp: new Date()
+          });
+          
+          // Retry the request with error feedback
+          const retryMessages = [
+            { role: 'system', content: GAME_MASTER_PROMPT },
+            ...this.conversationHistory
+          ];
+          
+          socket.emit('chat_request', {
+            messages: retryMessages,
+            model: config.model,
+            tools: TOOL_DEFINITIONS,
+            tool_choice: 'auto'
+          });
+          return; // Don't reject, let the retry handle it
+        }
+        
         reject(new Error(error.error || 'Unknown error'));
         cleanup();
       };
@@ -220,12 +331,14 @@ export class LLMService {
       socket.on('dynamic_component_update', handleDynamicUpdate);
 
       // Send the chat request with full conversation history
+      console.log('Emitting chat_request to server...');
       socket.emit('chat_request', {
         messages: fullMessages,
         model: config.model,
         tools: TOOL_DEFINITIONS,
         tool_choice: 'auto'
       });
+      console.log('chat_request emitted');
     });
   }
 
