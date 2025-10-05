@@ -131,7 +131,10 @@ export class LLMService {
 
   private static getSocket(): Socket {
     if (!this.socket) {
-      this.socket = io('http://localhost:8080');
+      // Use current domain for WebSocket connection
+      const socketUrl = window.location.origin;
+      console.log('Connecting to WebSocket at:', socketUrl);
+      this.socket = io(socketUrl);
     }
     return this.socket;
   }

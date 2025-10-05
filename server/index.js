@@ -41,7 +41,14 @@ if (!LLM_API_KEY) {
   console.warn('⚠️  LLM_API_KEY not set. Chat functionality will not work.');
 }
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000', 
+    'https://pathweaver-storytelling-0cc048134931.herokuapp.com'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Serve static files in production
