@@ -67,10 +67,8 @@ io.on('connection', (socket) => {
         tool_choice = 'auto' 
       } = data;
       
-      // Use requested model if it's a valid Groq model, otherwise fallback to best available model
-      const groqModel = (model && (model.includes('llama') || model.includes('mixtral') || model.includes('gemma') || model.includes('deepseek'))) 
-        ? model 
-        : 'llama-3.3-70b-versatile'; // Use the newest 70B model
+      // Always use the most reliable model for tool usage
+      const groqModel = 'llama-3.3-70b-versatile';
       
       console.log('Received WebSocket chat request:', { 
         messagesCount: messages.length, 
@@ -133,7 +131,27 @@ io.on('connection', (socket) => {
           if (toolCall.function.name === 'update_dynamic_component') {
             console.log('Handling dynamic component update:', JSON.stringify(toolCall));
             try {
-              const args = JSON.parse(toolCall.function.arguments);
+              let args;
+              try {
+                args = JSON.parse(toolCall.function.arguments);
+              } catch (parseError) {
+                console.log('Initial JSON parse failed, attempting to repair:', parseError.message);
+                // Try to repair common JSON issues in JSX code
+                let repairedArgs = toolCall.function.arguments
+                  .replace(/\\n/g, '\\\\n')  // Escape newlines
+                  .replace(/\\"/g, '\\\\"')  // Escape quotes
+                  .replace(/'/g, "\\'");     // Escape single quotes
+                
+                try {
+                  args = JSON.parse(repairedArgs);
+                  console.log('JSON repair successful');
+                } catch (repairError) {
+                  console.error('JSON repair failed:', repairError.message);
+                  console.error('Original arguments:', toolCall.function.arguments);
+                  return;
+                }
+              }
+              
               console.log('Emitting dynamic component update:', args);
               
               // Emit the dynamic component code back to the client
