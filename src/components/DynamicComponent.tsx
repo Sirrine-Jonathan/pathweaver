@@ -1,4 +1,5 @@
 import React, { useState, useEffect, ErrorInfo } from 'react';
+import * as Babel from '@babel/standalone';
 
 interface DynamicComponentProps {
   onEvent: (event: any) => void;
@@ -42,70 +43,63 @@ class DynamicComponentErrorBoundary extends React.Component<{children?: React.Re
 }
 
 /**
- * Safely transpile and render a dynamic component string
- */
-const transpileDynamicComponent = (componentString: string): React.FC<{onEvent: (event: any) => void}> | null => {
-  try {
-    // More comprehensive removal of import and export statements
-    const sanitizedCode = componentString
-      .replace(/^import\s+.*\s+from\s+['"].*['"];?/gm, '')  // Remove import statements
-      .replace(/^export\s+default\s*/gm, '')  // Remove 'export default'
-      .replace(/^export\s+/gm, '')  // Remove other export variations
-      .replace(/export\s+default\s*.*$/gm, '');  // Remove trailing export default
-
-    // Create a function that returns the component
-    const componentFactory = new Function('React', `
-      return (function(React) {
-        ${sanitizedCode}
-        
-        // Ensure AiDynamicComponent is defined
-        if (typeof AiDynamicComponent === 'undefined') {
-          const AiDynamicComponent = () => React.createElement('div', null, 'No component defined');
-        }
-        
-        // Wrap the component to ensure it receives onEvent prop
-        return (props) => {
-          return React.createElement(AiDynamicComponent, props);
-        };
-      })(React);
-    `);
-
-    // Pass React to the factory
-    const wrappedComponent = componentFactory(React);
-    
-    // Validate the component
-    if (typeof wrappedComponent !== 'function') {
-      console.error('Transpilation failed: Invalid component type');
-      return null;
-    }
-
-    return wrappedComponent;
-  } catch (error) {
-    console.error('Transpilation Error:', error);
-    return null;
-  }
-};
-
-/**
  * This is the entry point for AI-authored game UI.
  * The AI can create interactive game elements here.
  */
 const DynamicComponent: React.FC<DynamicComponentProps> = ({ onEvent, componentString }) => {
-  const [TranspiledComponent, setTranspiledComponent] = useState<React.FC<{onEvent: (event: any) => void}> | null>(null);
+  const [TranspiledComponent, setTranspiledComponent] = useState<React.ComponentType<any> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!componentString) {
+      setTranspiledComponent(null);
+      return;
+    }
+
     try {
-      const transpiledComponent = transpileDynamicComponent(componentString);
+      // Fix common JSX syntax errors
+      let fixedCode = componentString;
       
-      if (transpiledComponent) {
-        setTranspiledComponent(transpiledComponent);
-        setError(null);
-      } else {
-        setError('Failed to transpile the dynamic component');
+      // Fix case 1: return \n <div> (missing parentheses)
+      if (/return\s*\n\s*</.test(fixedCode) && !fixedCode.includes('return (')) {
+        fixedCode = fixedCode.replace(/return\s*\n\s*</, 'return (\n    <');
+        fixedCode = fixedCode.replace(/>\s*\n\s*\};\s*$/, '>\n  );\n}');
+        console.log('🔧 Fixed missing return parentheses');
       }
+      
+      // Fix case 2: return ( ... ); } (correct ending with }; instead of );)
+      fixedCode = fixedCode.replace(/\s*\};\s*\}$/, '\n  );\n}');
+      
+      // Fix case 3: return ( ... }; (missing closing parenthesis)
+      fixedCode = fixedCode.replace(/\)\s*\};\s*$/, ');\n}');
+      
+      console.log('🔧 Component code ready for transpilation');
+
+      // Wrap code in a function that returns a React component
+      const wrappedCode = `
+        (function(React) {
+          ${fixedCode}
+          return AiDynamicComponent;
+        })
+      `;
+
+      // Transpile to ES5 using Babel
+      const transpiled = Babel.transform(wrappedCode, {
+        presets: ["react", "env"],
+      }).code;
+
+      // eslint-disable-next-line no-new-func
+      const componentFactory = eval(transpiled);
+      const Comp = componentFactory(React);
+      setTranspiledComponent(() => Comp);
+      setError(null);
+      
+      console.log('✅ Successfully loaded dynamic component');
     } catch (err) {
+      console.error('💥 Error loading dynamic component:', err);
+      console.error('💥 Problematic code:', componentString);
       setError(err instanceof Error ? err.message : 'Unknown error occurred during component transpilation');
+      setTranspiledComponent(null);
     }
   }, [componentString]);
 
@@ -117,8 +111,8 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({ onEvent, componentS
           <div className="text-6xl mb-4">⚠️</div>
           <h1 className="text-2xl font-bold text-red-800 mb-4">Dynamic Component Error</h1>
           <p className="text-red-600 mb-6">{error}</p>
-          <pre className="text-xs text-red-500 bg-red-50 p-2 rounded">
-            Component String: {componentString}
+          <pre className="text-xs text-red-500 bg-red-50 p-2 rounded max-w-md overflow-auto">
+            {componentString}
           </pre>
         </div>
       </div>
@@ -130,7 +124,6 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({ onEvent, componentS
     return (
       <div className="flex-1 h-full w-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
         <div className="text-center p-8">
-          <div className="text-6xl mb-4">🎮</div>
           <h1 className="text-3xl font-bold text-gray-800 mb-4">Pathweaver</h1>
           <p className="text-gray-600 mb-6">
             Interactive storytelling powered by AI

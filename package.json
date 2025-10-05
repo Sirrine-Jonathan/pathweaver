@@ -3,17 +3,26 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "description": "Interactive AI storytelling adventure game powered by Groq",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "cd server && npm run dev",
+    "dev:full": "concurrently \"npm run dev\" \"npm run server\"",
+    "start": "cd server && npm start",
+    "heroku-postbuild": "npm run build:all",
+    "build:all": "cd server && npm install && cd .. && npm install && npm run build"
   },
   "dependencies": {
     "@babel/standalone": "^7.28.3",
     "@supabase/supabase-js": "^2.38.0",
-    "lucide-react": "^0.263.1",
+    "@types/socket.io-client": "^1.4.36",
+    "lucide-react": "^0.544.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@types/babel__standalone": "^7.1.9",
@@ -21,9 +30,25 @@
     "@types/react-dom": "^18.2.7",
     "@vitejs/plugin-react": "^4.0.3",
     "autoprefixer": "^10.4.14",
+    "concurrently": "^8.2.2",
     "postcss": "^8.4.27",
     "tailwindcss": "^3.3.3",
     "typescript": "^5.0.2",
     "vite": "^4.4.5"
-  }
+  },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  },
+  "keywords": [
+    "ai",
+    "storytelling",
+    "interactive",
+    "adventure",
+    "game",
+    "groq",
+    "react"
+  ],
+  "author": "Jonathan Sirrine",
+  "license": "MIT"
 }

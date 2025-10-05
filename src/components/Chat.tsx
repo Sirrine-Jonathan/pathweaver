@@ -17,6 +17,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ config, onDynamicComponentUpdate 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const initialMessageSentRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Expose sendEventMessage to parent via ref
@@ -36,15 +37,33 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ config, onDynamicComponentUpdate 
 
   // Send initial message when chat component mounts
   useEffect(() => {
-    if (!hasStarted) {
-      setHasStarted(true);
-      handleSendMessage('Hello! I\'d like to start a new adventure.');
-    }
-  }, [hasStarted]);
+    const sendInitialMessage = async () => {
+      // Prevent multiple sends and ensure it's only sent once
+      if (!initialMessageSentRef.current && !hasStarted) {
+        initialMessageSentRef.current = true;
+        setHasStarted(true);
+        
+        try {
+          await handleSendMessage('Hello! I\'d like to start a new adventure.');
+        } catch (error) {
+          console.error('Error sending initial message:', error);
+          initialMessageSentRef.current = false;
+        }
+      }
+    };
+
+    sendInitialMessage();
+  }, []);
 
   const handleSendMessage = async (messageText?: string) => {
     const text = messageText || input.trim();
     if (!text || isLoading) return;
+
+    // Prevent duplicate sends
+    if (isLoading) {
+      console.warn('Message send already in progress');
+      return;
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
