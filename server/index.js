@@ -29,6 +29,14 @@ const PORT = process.env.PORT || 8080;
 const LLM_BASE_URL = process.env.LLM_BASE_URL || 'https://api.groq.com/openai/v1';
 const LLM_API_KEY = process.env.LLM_API_KEY;
 
+console.log('🔧 Server starting...');
+console.log('Environment variables:');
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+console.log('- PORT:', process.env.PORT);
+console.log('- LLM_API_KEY configured:', !!LLM_API_KEY);
+console.log('- LLM_API_KEY length:', LLM_API_KEY?.length || 0);
+console.log('- LLM_BASE_URL:', LLM_BASE_URL);
+
 if (!LLM_API_KEY) {
   console.warn('⚠️  LLM_API_KEY not set. Chat functionality will not work.');
 }
