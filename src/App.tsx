@@ -68,7 +68,12 @@ function App() {
       <div className={`flex-1 flex flex-col`}>
         <header className="bg-white border-b p-4 flex justify-between items-center">
           <div className="flex items-center space-x-3">
-            <div className="text-2xl">🎭</div>
+            <div className="relative">
+              {/* Ethereal floating orb */}
+              <div className="w-8 h-8 bg-gradient-to-br from-purple-400 via-blue-500 to-indigo-600 rounded-full shadow-lg animate-[pulse_10s_ease-in-out_infinite]"></div>
+              <div className="absolute inset-0 w-8 h-8 bg-gradient-to-br from-purple-300 via-blue-400 to-indigo-500 rounded-full opacity-60 animate-[ping_15s_ease-in-out_infinite]"></div>
+              <div className="absolute inset-1 w-6 h-6 bg-white rounded-full opacity-20"></div>
+            </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Pathweaver</h1>
               <p className="text-gray-600 text-sm">Interactive AI Storytelling</p>
