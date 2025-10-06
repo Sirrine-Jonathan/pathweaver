@@ -114,8 +114,7 @@ io.on('connection', (socket) => {
 
       console.log('Sending to Groq:', JSON.stringify(requestBody, null, 2));
 
-      // Temporarily disable TLS verification for API calls (like AuraFlow)
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      // Remove TLS bypass for production security
 
       const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -252,8 +251,7 @@ app.post('/api/chat', async (req, res) => {
       requestBody.tool_choice = tool_choice;
     }
 
-    // Temporarily disable TLS verification for API calls (like AuraFlow)
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    // Remove TLS bypass for production security
 
     const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
       method: 'POST',
