@@ -13,6 +13,13 @@ CRITICAL RULES:
 6. You can respond with just text to narrate story progression - you don't always need to create components
 7. CRITICAL: When using tools, ensure your JSON is properly formatted with escaped quotes and no unescaped newlines
 
+UI/UX REQUIREMENTS:
+8. NEVER attempt to use images, icons, or visual assets - they are not supported and will break the interface
+9. ALWAYS provide interactive buttons or choices when the story requires user input - never leave users without options
+10. ALWAYS add proper spacing between buttons using Tailwind classes like 'space-x-4', 'space-y-4', 'gap-4', or 'mb-4'
+11. Use text-based visual elements like ASCII art, emojis, or styled text instead of images
+12. Ensure buttons are clearly labeled and have proper hover states using Tailwind classes
+
 NARRATIVE EXCELLENCE REQUIREMENTS:
 - Write with literary quality - use vivid, sensory descriptions that immerse the player
 - Create atmospheric tension through pacing, word choice, and environmental details
@@ -94,29 +101,34 @@ const TOOL_DEFINITIONS = [
         properties: {
           code: {
             type: "string",
-            description: "Complete React component code as a JSX/JS code string. IMPORTANT RULES:\n" +
-              "1. DO NOT use 'import' or 'export' statements inside the component. React and other dependencies are already imported.\n" +
-              "2. Write the component as a standalone function named AiDynamicComponent that accepts an onEvent prop.\n" +
-              "3. Use React hooks and components directly without additional imports.\n" +
-              "4. ALWAYS use onEvent in your click handlers: onClick={() => onEvent('action_name', data)}\n" +
-              "5. Use Tailwind CSS classes for styling (e.g., 'bg-blue-500 text-white p-4 rounded')\n" +
-              "6. CRITICAL: Use proper arrow function syntax with return statement:\n" +
-              "   CORRECT: const AiDynamicComponent = ({ onEvent }) => {\n" +
-              "     return (\n" +
-              "       <div>content</div>\n" +
-              "     );\n" +
-              "   }\n" +
-              "   WRONG: return <div>content</div>; (missing parentheses)\n" +
-              "   WRONG: return (<div>content</div>}; (wrong closing)\n" +
-              "7. Example: const AiDynamicComponent = ({ onEvent }) => {\n" +
-              "     const [state, setState] = React.useState(initialState);\n" +
-              "     return (\n" +
-              "       <div className='w-full h-full p-6 bg-gray-100 flex flex-col'>\n" +
-              "         <button className='bg-blue-500 text-white px-4 py-2 rounded' onClick={() => onEvent('button_clicked', 'data')}>Click me</button>\n" +
-              "       </div>\n" +
-              "     );\n" +
-              "   }\n" +
-              "8. ALWAYS use 'w-full h-full' classes on your root div to fill the container completely",
+            description: "Complete React component code as a JSX/JS code string. IMPORTANT RULES:\\n" +
+              "1. DO NOT use 'import' or 'export' statements inside the component. React and other dependencies are already imported.\\n" +
+              "2. Write the component as a standalone function named AiDynamicComponent that accepts an onEvent prop.\\n" +
+              "3. Use React hooks and components directly without additional imports.\\n" +
+              "4. ALWAYS use onEvent in your click handlers: onClick={() => onEvent('action_name', data)}\\n" +
+              "5. Use Tailwind CSS classes for styling (e.g., 'bg-blue-500 text-white p-4 rounded')\\n" +
+              "6. CRITICAL: Use proper arrow function syntax with return statement:\\n" +
+              "   CORRECT: const AiDynamicComponent = ({ onEvent }) => {\\n" +
+              "     return (\\n" +
+              "       <div>content</div>\\n" +
+              "     );\\n" +
+              "   }\\n" +
+              "   WRONG: return <div>content</div>; (missing parentheses)\\n" +
+              "   WRONG: return (<div>content</div>}; (wrong closing)\\n" +
+              "7. Example: const AiDynamicComponent = ({ onEvent }) => {\\n" +
+              "     const [state, setState] = React.useState(initialState);\\n" +
+              "     return (\\n" +
+              "       <div className='w-full h-full p-6 bg-gray-100 flex flex-col'>\\n" +
+              "         <button className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors' onClick={() => onEvent('button_clicked', 'data')}>Click me</button>\\n" +
+              "       </div>\\n" +
+              "     );\\n" +
+              "   }\\n" +
+              "8. ALWAYS use 'w-full h-full' classes on your root div to fill the container completely\\n" +
+              "9. NEVER use images, img tags, or attempt to load visual assets - use text, emojis, or ASCII art instead\\n" +
+              "10. ALWAYS provide interactive elements (buttons/choices) when user input is needed\\n" +
+              "11. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
+              "12. Example button spacing: <div className='flex space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
+              "13. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX",
           }
         },
         required: ["code"]

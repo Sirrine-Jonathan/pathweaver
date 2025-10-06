@@ -90,12 +90,12 @@ function App() {
                     Rate limited, retrying in {Math.floor(rateLimitCountdown / 60)}m {rateLimitCountdown % 60}s...
                   </span>
                 </div>
-              ) : chatRef.current?.isLoading && (
+              ) : chatRef.current?.isLoading ? (
                 <div className="flex items-center space-x-2 text-blue-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                   <span className="text-sm">Thinking...</span>
                 </div>
-              )}
+              ) : null}
             </>
           )}
         </header>
