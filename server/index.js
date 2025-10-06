@@ -61,6 +61,13 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// LLM Configuration
+const LLM_CONFIG = {
+  temperature: 0.8,
+  top_p: 0.9,
+  max_tokens: 2048
+};
+
 // WebSocket connection handler
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -102,8 +109,7 @@ io.on('connection', (socket) => {
       const requestBody = {
         model: groqModel,
         messages: cleanMessages,
-        temperature: 0.3,
-        top_p: 0.8
+        ...LLM_CONFIG
       };
 
       // Add tools to request if provided
@@ -245,8 +251,7 @@ app.post('/api/chat', async (req, res) => {
     const requestBody = {
       model: groqModel,
       messages: cleanMessages,
-      temperature: 0.3,
-      top_p: 0.8
+      ...LLM_CONFIG
     };
 
     if (tools && tools.length > 0) {
