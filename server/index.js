@@ -114,7 +114,10 @@ io.on('connection', (socket) => {
 
       console.log('Sending to Groq:', JSON.stringify(requestBody, null, 2));
 
-      // Remove TLS bypass for production security
+      // Disable TLS verification for local development only
+      if (process.env.NODE_ENV !== 'production') {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      }
 
       const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -251,7 +254,10 @@ app.post('/api/chat', async (req, res) => {
       requestBody.tool_choice = tool_choice;
     }
 
-    // Remove TLS bypass for production security
+    // Disable TLS verification for local development only
+    if (process.env.NODE_ENV !== 'production') {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
 
     const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
       method: 'POST',

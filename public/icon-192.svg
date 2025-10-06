@@ -1,0 +1,22 @@
+<svg width="192" height="192" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="orb" cx="0.3" cy="0.3" r="0.8">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </radialGradient>
+    <radialGradient id="highlight" cx="0.3" cy="0.3" r="0.5">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  
+  <!-- Main orb -->
+  <circle cx="96" cy="96" r="84" fill="url(#orb)" opacity="0.9"/>
+  
+  <!-- Inner highlight -->
+  <circle cx="96" cy="96" r="48" fill="url(#highlight)"/>
+  
+  <!-- Subtle outer glow -->
+  <circle cx="96" cy="96" r="90" fill="none" stroke="url(#orb)" stroke-width="3" opacity="0.3"/>
+</svg>

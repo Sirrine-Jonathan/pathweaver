@@ -1,0 +1,38 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="orb" cx="0.3" cy="0.3" r="0.8">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </radialGradient>
+    <radialGradient id="highlight" cx="0.3" cy="0.3" r="0.5">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  
+  <!-- Main orb -->
+  <circle cx="300" cy="315" r="120" fill="url(#orb)" opacity="0.9"/>
+  
+  <!-- Inner highlight -->
+  <circle cx="300" cy="315" r="72" fill="url(#highlight)"/>
+  
+  <!-- Subtle outer glow -->
+  <circle cx="300" cy="315" r="135" fill="none" stroke="url(#orb)" stroke-width="4" opacity="0.3"/>
+  
+  <!-- Title -->
+  <text x="500" y="280" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#1e293b">Pathweaver</text>
+  
+  <!-- Subtitle -->
+  <text x="500" y="340" font-family="Arial, sans-serif" font-size="36" fill="#64748b">Interactive AI Storytelling</text>
+  
+  <!-- Description -->
+  <text x="500" y="400" font-family="Arial, sans-serif" font-size="24" fill="#64748b">Create dynamic adventures powered by AI</text>
+</svg>

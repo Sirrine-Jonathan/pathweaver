@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Chat from './components/Chat';
 import DynamicComponent from './components/DynamicComponent';
+import InstallPrompt from './components/InstallPrompt';
 import { LLMConfig } from './types';
 import { LLMService } from './services/llm';
 
@@ -17,6 +18,7 @@ function App() {
   const [gameStarted, setGameStarted] = useState(false);
   const [dynamicComponentCode, setDynamicComponentCode] = useState<string | null>(null);
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Load config from localStorage
   useEffect(() => {
@@ -90,7 +92,7 @@ function App() {
                     Rate limited, retrying in {Math.floor(rateLimitCountdown / 60)}m {rateLimitCountdown % 60}s...
                   </span>
                 </div>
-              ) : chatRef.current?.isLoading ? (
+              ) : isLoading ? (
                 <div className="flex items-center space-x-2 text-blue-600">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                   <span className="text-sm">Thinking...</span>
@@ -133,11 +135,14 @@ function App() {
                 ref={chatRef}
                 config={config} 
                 onDynamicComponentUpdate={handleDynamicComponentUpdate}
+                onLoadingChange={setIsLoading}
               />
             </div>
           )}
         </main>
       </div>
+      
+      <InstallPrompt />
     </div>
   );
 }

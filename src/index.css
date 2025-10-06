@@ -1,3 +1,8 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Ensure buttons in AI-generated content have proper spacing */
+.ai-dynamic-content button {
+  margin: 5px;
+}

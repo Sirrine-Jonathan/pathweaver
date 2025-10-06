@@ -5,9 +5,10 @@ import { ChatMessage, LLMConfig } from '../types';
 interface ChatProps {
   config: LLMConfig;
   onDynamicComponentUpdate: (code: string) => void;
+  onLoadingChange: (loading: boolean) => void;
 }
 
-const Chat = forwardRef<any, ChatProps>(({ config, onDynamicComponentUpdate }, ref) => {
+const Chat = forwardRef<any, ChatProps>(({ config, onDynamicComponentUpdate, onLoadingChange }, ref) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -15,8 +16,7 @@ const Chat = forwardRef<any, ChatProps>(({ config, onDynamicComponentUpdate }, r
   useImperativeHandle(ref, () => ({
     sendEventMessage: (eventMessage: string) => {
       handleSendMessage(eventMessage);
-    },
-    isLoading
+    }
   }));
 
   const handleSendMessage = async (messageText?: string) => {
@@ -36,6 +36,7 @@ const Chat = forwardRef<any, ChatProps>(({ config, onDynamicComponentUpdate }, r
     setMessages(newMessages);
     setInput('');
     setIsLoading(true);
+    onLoadingChange(true);
 
     try {
       console.log('Calling LLMService.generateResponse...');
@@ -49,6 +50,7 @@ const Chat = forwardRef<any, ChatProps>(({ config, onDynamicComponentUpdate }, r
       console.error('Error sending message:', error);
     } finally {
       setIsLoading(false);
+      onLoadingChange(false);
     }
   };
 

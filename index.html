@@ -3,8 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
     <title>Pathweaver - Interactive AI Storytelling</title>
-    <meta name="description" content="Create dynamic, interactive adventures powered by AI">
+    <meta name="description" content="Create dynamic, interactive adventures powered by AI. Immersive storytelling with choices that matter.">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://pathweaver-storytelling-0cc048134931.herokuapp.com/" />
+    <meta property="og:title" content="Pathweaver - Interactive AI Storytelling" />
+    <meta property="og:description" content="Create dynamic, interactive adventures powered by AI. Immersive storytelling with choices that matter." />
+    <meta property="og:image" content="https://pathweaver-storytelling-0cc048134931.herokuapp.com/og-image.svg" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://pathweaver-storytelling-0cc048134931.herokuapp.com/" />
+    <meta property="twitter:title" content="Pathweaver - Interactive AI Storytelling" />
+    <meta property="twitter:description" content="Create dynamic, interactive adventures powered by AI. Immersive storytelling with choices that matter." />
+    <meta property="twitter:image" content="https://pathweaver-storytelling-0cc048134931.herokuapp.com/og-image.svg" />
+
+    <!-- Apple -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
     
     <!-- Ethereal orb favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -12,5 +31,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js');
+        });
+      }
+    </script>
   </body>
 </html>

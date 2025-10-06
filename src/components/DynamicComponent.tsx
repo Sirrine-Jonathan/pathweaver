@@ -139,7 +139,9 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({ onEvent, componentS
   // Render the transpiled component within an error boundary
   return (
     <DynamicComponentErrorBoundary>
-      <TranspiledComponent onEvent={onEvent} />
+      <div className="ai-dynamic-content">
+        <TranspiledComponent onEvent={onEvent} />
+      </div>
     </DynamicComponentErrorBoundary>
   );
 };
