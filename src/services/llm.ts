@@ -129,12 +129,12 @@ const TOOL_DEFINITIONS = [
               "9. Example: Use 'Welcome to the Realm of Wonder' instead of 'Welcome to \"Realm of Wonder\"'\\n" +
               "10. ALWAYS use 'w-full h-full' classes on your root div to fill the container completely\\n" +
               "9. NEVER use images, img tags, or attempt to load visual assets - use text, emojis, or ASCII art instead\\n" +
-              "10. ALWAYS provide interactive elements (buttons/choices) when user input is needed\\n" +
+              "10. ALWAYS provide interactive elements (buttons/choices/controls) when user input is needed\\n" +
               "11. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
-              "12. Example button spacing: <div className='flex flex-col space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
+              "12. Example button spacing: <div className='flex flex-col justify-end space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
               "13. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX\\n" +
               "14. AVOID double quotes in JSX text - use single quotes or no quotes to prevent JSON parsing errors\\n" +
-              "15. ALWAYS Style your component for mobile responsiveness (mobile first!)",
+              "15. ALWAYS style your component for mobile responsiveness (mobile first!)",
           },
         },
         required: ["code"],
@@ -305,7 +305,7 @@ export class LLMService {
                 messages: retryMessages,
                 model: config.model,
                 tools: TOOL_DEFINITIONS,
-                tool_choice: "auto",
+                tool_choice: "required",
               });
             });
             return; // Don't reject, let the retry handle it
@@ -333,7 +333,7 @@ export class LLMService {
             messages: retryMessages,
             model: config.model,
             tools: TOOL_DEFINITIONS,
-            tool_choice: "auto",
+            tool_choice: "required",
           });
           return; // Don't reject, let the retry handle it
         }
@@ -374,7 +374,7 @@ export class LLMService {
         messages: fullMessages,
         model: config.model,
         tools: TOOL_DEFINITIONS,
-        tool_choice: "auto",
+        tool_choice: "required",
       });
       console.log("chat_request emitted");
     });

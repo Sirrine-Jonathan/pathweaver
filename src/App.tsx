@@ -64,7 +64,9 @@ function App() {
     if (gameStarted && chatRef.current) {
       // Send event as a user message with recognizable prefix, including data
       const eventString = data ? `${event}: ${JSON.stringify(data)}` : event;
-      chatRef.current.sendEventMessage(`[DYNAMIC_EVENT] ${eventString}`);
+      chatRef.current.sendEventMessage(
+        `[DYNAMIC_EVENT - respond to this specific user action and advance the story] ${eventString}`
+      );
     }
   };
 

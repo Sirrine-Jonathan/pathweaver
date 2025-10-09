@@ -86,7 +86,7 @@ const Chat = forwardRef<any, ChatProps>(
       if (!text || isLoading) return;
 
       console.log("Sending message to LLM:", { text, config });
-      if (!isFirst && !text.includes("[DYNAMIC_EVENT]")) {
+      if (!isFirst && !text.includes("[DYNAMIC_EVENT")) {
         playLastMessage(text);
       }
 
