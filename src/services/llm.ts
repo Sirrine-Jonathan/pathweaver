@@ -1,6 +1,5 @@
-import { ChatMessage, LLMConfig } from '../types';
-import { io } from 'socket.io-client';
-import type { Socket } from 'socket.io-client';
+import { ChatMessage, LLMConfig } from "../types";
+import { io as InternetSocket } from "socket.io-client";
 
 const GAME_MASTER_PROMPT = `You are a master storyteller running an immersive interactive adventure game (aim for 20-30 total interactions for a rich experience).
 
@@ -95,13 +94,15 @@ const TOOL_DEFINITIONS = [
     type: "function",
     function: {
       name: "update_dynamic_component",
-      description: "Update the dynamic React component displayed in the main game area. Use this to create interactive game elements like character selection, inventory, mini-games, puzzles, and story scenes.",
+      description:
+        "Update the dynamic React component displayed in the main game area. Use this to create interactive game elements like character selection, inventory, mini-games, puzzles, and story scenes.",
       parameters: {
         type: "object",
         properties: {
           code: {
             type: "string",
-            description: "Complete React component code as a JSX/JS code string. IMPORTANT RULES:\\n" +
+            description:
+              "Complete React component code as a JSX/JS code string. IMPORTANT RULES:\\n" +
               "1. DO NOT use 'import' or 'export' statements inside the component. React and other dependencies are already imported.\\n" +
               "2. Write the component as a standalone function named AiDynamicComponent that accepts an onEvent prop.\\n" +
               "3. Use React hooks and components directly without additional imports.\\n" +
@@ -130,48 +131,50 @@ const TOOL_DEFINITIONS = [
               "9. NEVER use images, img tags, or attempt to load visual assets - use text, emojis, or ASCII art instead\\n" +
               "10. ALWAYS provide interactive elements (buttons/choices) when user input is needed\\n" +
               "11. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
-              "12. Example button spacing: <div className='flex space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
+              "12. Example button spacing: <div className='flex flex-col space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
               "13. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX\\n" +
-              "14. AVOID double quotes in JSX text - use single quotes or no quotes to prevent JSON parsing errors",
-          }
+              "14. AVOID double quotes in JSX text - use single quotes or no quotes to prevent JSON parsing errors\\n" +
+              "15. ALWAYS Style your component for mobile responsiveness (mobile first!)",
+          },
         },
-        required: ["code"]
-      }
-    }
-  }
+        required: ["code"],
+      },
+    },
+  },
 ];
 
 export class LLMService {
-  private static socket: Socket | null = null;
+  private static socket: SocketIOClient.Socket | null = null;
   private static conversationHistory: ChatMessage[] = [];
   private static rateLimitCallback: ((seconds: number) => void) | null = null;
 
-  private static getSocket(): Socket {
+  private static getSocket(): SocketIOClient.Socket | null {
     if (!this.socket) {
       // Use backend server URL for development, current domain for production
-      const socketUrl = process.env.NODE_ENV === 'production' 
-        ? window.location.origin 
-        : 'http://localhost:8080';
-      console.log('Connecting to WebSocket at:', socketUrl);
-      this.socket = io(socketUrl);
+      const socketUrl =
+        process.env.NODE_ENV === "production"
+          ? window.location.origin
+          : "http://localhost:8080";
+      console.log("Connecting to WebSocket at:", socketUrl);
+      this.socket = InternetSocket(socketUrl);
     }
     return this.socket;
   }
 
   private static handleRateLimit(seconds: number, retryCallback: () => void) {
     let countdown = seconds;
-    
+
     // Notify UI about rate limit
     if (this.rateLimitCallback) {
       this.rateLimitCallback(countdown);
     }
-    
+
     const timer = setInterval(() => {
       countdown--;
       if (this.rateLimitCallback) {
         this.rateLimitCallback(countdown);
       }
-      
+
       if (countdown <= 0) {
         clearInterval(timer);
         if (this.rateLimitCallback) {
@@ -188,7 +191,7 @@ export class LLMService {
 
   private static addToHistory(message: ChatMessage) {
     this.conversationHistory.push(message);
-    
+
     // Keep only last 20 messages to prevent context overflow
     if (this.conversationHistory.length > 20) {
       this.conversationHistory = this.conversationHistory.slice(-20);
@@ -196,18 +199,19 @@ export class LLMService {
   }
 
   static async generateResponse(
-    messages: ChatMessage[], 
+    messages: ChatMessage[],
     config: LLMConfig,
-    onDynamicComponentUpdate?: (code: string) => void
+    onDynamicComponentUpdate?: (code: string) => void,
+    onError?: (error: Error | null) => void
   ): Promise<string> {
-    console.log('LLMService.generateResponse called with:', { 
-      messagesCount: messages.length, 
-      config: { ...config, apiKey: '[REDACTED]' }
+    console.log("LLMService.generateResponse called with:", {
+      messagesCount: messages.length,
+      config: { ...config, apiKey: "[REDACTED]" },
     });
 
     return new Promise((resolve, reject) => {
       const socket = this.getSocket();
-      console.log('Socket obtained, setting up listeners...');
+      console.log("Socket obtained, setting up listeners...");
 
       // Add new user message to history
       const userMessage = messages[messages.length - 1];
@@ -215,146 +219,164 @@ export class LLMService {
 
       // Build full conversation with system prompt + history
       const fullMessages = [
-        { role: 'system', content: GAME_MASTER_PROMPT },
-        ...this.conversationHistory
+        { role: "system", content: GAME_MASTER_PROMPT },
+        ...this.conversationHistory,
       ];
 
-      console.log('Full conversation built:', {
+      console.log("Full conversation built:", {
         systemPrompt: !!GAME_MASTER_PROMPT,
         historyCount: this.conversationHistory.length,
-        totalMessages: fullMessages.length
+        totalMessages: fullMessages.length,
       });
 
       // Set up event listeners
       const handleResponse = (data: any) => {
-        console.log('Received chat response:', data);
-        
+        console.log("Received chat response:", data);
+
         // Add assistant response to history, but filter out [TOOL_CALL] mentions
         if (data.content) {
-          const cleanContent = data.content.replace(/\[TOOL_CALL\]\s*update_dynamic_component/g, '').trim();
+          const cleanContent = data.content
+            .replace(/\[TOOL_CALL\]\s*update_dynamic_component/g, "")
+            .trim();
           if (cleanContent) {
             this.addToHistory({
               id: Date.now().toString(),
-              role: 'assistant',
+              role: "assistant",
               content: cleanContent,
-              timestamp: new Date()
+              timestamp: new Date(),
             });
           }
         }
-        
-        resolve(data.content || '');
+
+        resolve(data.content || "");
         cleanup();
       };
 
       const handleError = (error: any) => {
-        console.error('Chat error:', error);
-        
+        console.error("Chat error:", error);
+        socket?.emit("chat_error", {
+          error,
+        });
+        onError?.(error);
+
         // Check for rate limit error - look for both the code and the retry time
-        if (error.details && (error.details.includes('rate_limit_exceeded') || error.details.includes('Rate limit reached'))) {
+        if (
+          error.details &&
+          (error.details.includes("rate_limit_exceeded") ||
+            error.details.includes("Rate limit reached"))
+        ) {
           // Extract retry time from error message - handle both seconds and minutes
           let retrySeconds = 0;
-          
+
           // Try to match minutes and seconds format: "15m3.939999999s"
-          const minutesMatch = error.details.match(/Please try again in (\d+)m([\d.]+)s/);
+          const minutesMatch = error.details.match(
+            /Please try again in (\d+)m([\d.]+)s/
+          );
           if (minutesMatch) {
             const minutes = parseInt(minutesMatch[1]);
             const seconds = parseFloat(minutesMatch[2]);
             retrySeconds = Math.ceil(minutes * 60 + seconds);
           } else {
             // Try to match seconds only format: "4.765s"
-            const secondsMatch = error.details.match(/Please try again in ([\d.]+)s/);
+            const secondsMatch = error.details.match(
+              /Please try again in ([\d.]+)s/
+            );
             if (secondsMatch) {
               retrySeconds = Math.ceil(parseFloat(secondsMatch[1]));
             }
           }
-          
+
           if (retrySeconds > 0) {
-            console.log(`Rate limited, retrying in ${retrySeconds} seconds (${Math.floor(retrySeconds/60)}m ${retrySeconds%60}s)...`);
-            
+            console.log(
+              `Rate limited, retrying in ${retrySeconds} seconds (${Math.floor(
+                retrySeconds / 60
+              )}m ${retrySeconds % 60}s)...`
+            );
+
             // Start countdown and auto-retry
             this.handleRateLimit(retrySeconds, () => {
               // Retry the same request
               const retryMessages = [
-                { role: 'system', content: GAME_MASTER_PROMPT },
-                ...this.conversationHistory
+                { role: "system", content: GAME_MASTER_PROMPT },
+                ...this.conversationHistory,
               ];
-              
-              socket.emit('chat_request', {
+
+              socket?.emit("chat_request", {
                 messages: retryMessages,
                 model: config.model,
                 tools: TOOL_DEFINITIONS,
-                tool_choice: 'auto'
+                tool_choice: "auto",
               });
             });
             return; // Don't reject, let the retry handle it
           }
         }
-        
+
         // If it's a retry error, automatically send feedback to LLM
         if (error.retry) {
-          console.log('Retrying with error feedback...');
+          console.log("Retrying with error feedback...");
           // Add error feedback to conversation and retry
           this.addToHistory({
             id: Date.now().toString(),
-            role: 'system',
+            role: "system",
             content: `Error: ${error.details}. Please retry with a simpler approach.`,
-            timestamp: new Date()
+            timestamp: new Date(),
           });
-          
+
           // Retry the request with error feedback
           const retryMessages = [
-            { role: 'system', content: GAME_MASTER_PROMPT },
-            ...this.conversationHistory
+            { role: "system", content: GAME_MASTER_PROMPT },
+            ...this.conversationHistory,
           ];
-          
-          socket.emit('chat_request', {
+
+          socket?.emit("chat_request", {
             messages: retryMessages,
             model: config.model,
             tools: TOOL_DEFINITIONS,
-            tool_choice: 'auto'
+            tool_choice: "auto",
           });
           return; // Don't reject, let the retry handle it
         }
-        
-        reject(new Error(error.error || 'Unknown error'));
+
+        reject(new Error(error.error || "Unknown error"));
         cleanup();
       };
 
       const handleDynamicUpdate = (data: any) => {
-        console.log('Received dynamic component update:', data);
+        console.log("Received dynamic component update:", data);
         if (onDynamicComponentUpdate && data.code) {
           onDynamicComponentUpdate(data.code);
-          
+
           // Add tool call to history for context
           this.addToHistory({
             id: Date.now().toString(),
-            role: 'assistant',
+            role: "assistant",
             content: `[TOOL_CALL] update_dynamic_component`,
-            timestamp: new Date()
+            timestamp: new Date(),
           });
         }
       };
 
       const cleanup = () => {
-        socket.off('chat_response', handleResponse);
-        socket.off('chat_error', handleError);
-        socket.off('dynamic_component_update', handleDynamicUpdate);
+        socket?.off("chat_response", handleResponse);
+        socket?.off("chat_error", handleError);
+        socket?.off("dynamic_component_update", handleDynamicUpdate);
       };
 
       // Register event listeners
-      socket.on('chat_response', handleResponse);
-      socket.on('chat_error', handleError);
-      socket.on('dynamic_component_update', handleDynamicUpdate);
+      socket?.on("chat_response", handleResponse);
+      socket?.on("chat_error", handleError);
+      socket?.on("dynamic_component_update", handleDynamicUpdate);
 
       // Send the chat request with full conversation history
-      console.log('Emitting chat_request to server...');
-      socket.emit('chat_request', {
+      console.log("Emitting chat_request to server...");
+      socket?.emit("chat_request", {
         messages: fullMessages,
         model: config.model,
         tools: TOOL_DEFINITIONS,
-        tool_choice: 'auto'
+        tool_choice: "auto",
       });
-      console.log('chat_request emitted');
+      console.log("chat_request emitted");
     });
   }
 
