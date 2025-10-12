@@ -12,7 +12,7 @@ import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 
 interface ChatProps {
   config: LLMConfig;
-  onDynamicComponentUpdate: (code: string) => void;
+  onDynamicComponentUpdate: (code: string, modelName?: string) => void;
   onLoadingChange: (loading: boolean) => void;
   onError: (error: Error | null) => void;
   onUserMessage?: (message: ChatMessage) => void;
@@ -147,9 +147,12 @@ const Chat = forwardRef<any, ChatProps>(
       // Track component code from this interaction
       let componentCodeFromThisResponse: string | undefined;
       const originalOnDynamicComponentUpdate = onDynamicComponentUpdate;
-      const wrappedOnDynamicComponentUpdate = (code: string) => {
+      const wrappedOnDynamicComponentUpdate = (
+        code: string,
+        modelName?: string
+      ) => {
         componentCodeFromThisResponse = code;
-        originalOnDynamicComponentUpdate(code);
+        originalOnDynamicComponentUpdate(code, modelName);
       };
 
       try {

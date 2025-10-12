@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,6 +73,99 @@ const LLM_CONFIG = {
   max_tokens: 2048,
 };
 
+// Model fallback priority list - dynamically populated at startup
+let MODEL_FALLBACK_LIST = [
+  "llama-3.3-70b-versatile", // Fallback if API fetch fails
+  "llama-3.1-8b-instant",
+];
+
+// Fetch available models and build dynamic fallback list
+async function initializeModelFallbackList() {
+  try {
+    console.log("🔄 Fetching available models from Groq...");
+
+    const response = await fetch(`${LLM_BASE_URL}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${LLM_API_KEY}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Models API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Filter for tool-capable models (exclude guard/prompt models)
+    const toolCapableModels = data.data.filter(
+      (model) =>
+        (model.id.includes("llama") ||
+          model.id.includes("mixtral") ||
+          model.id.includes("gemma") ||
+          model.id.includes("deepseek")) &&
+        !model.id.includes("guard") &&
+        !model.id.includes("prompt-guard") &&
+        model.max_completion_tokens >= 4096
+    );
+
+    if (toolCapableModels.length === 0) {
+      throw new Error("No tool-capable models found");
+    }
+
+    // Sort models by size/capability for optimal fallback order
+    const sortedModels = toolCapableModels.sort((a, b) => {
+      // Prefer larger models first, then smaller ones
+      const sizeA = parseInt(a.id.match(/(\d+)b/)?.[1] || "0");
+      const sizeB = parseInt(b.id.match(/(\d+)b/)?.[1] || "0");
+      return sizeB - sizeA; // Descending order
+    });
+
+    // Build fallback list: best model, then smallest models, then mid-range
+    const best70b = sortedModels.find(
+      (m) => m.id.includes("70b") && m.id.includes("3.3")
+    );
+    const best8b = sortedModels.find(
+      (m) => m.id.includes("8b") && m.id.includes("instant")
+    );
+    const otherSmall = sortedModels.filter((m) => {
+      const size = parseInt(m.id.match(/(\d+)b/)?.[1] || "0");
+      return size <= 9 && m.id !== best8b?.id;
+    });
+    const other70b = sortedModels.filter(
+      (m) => m.id.includes("70b") && m.id !== best70b?.id
+    );
+
+    MODEL_FALLBACK_LIST = [
+      best70b?.id,
+      best8b?.id,
+      ...otherSmall.slice(0, 2).map((m) => m.id),
+      ...other70b.slice(0, 1).map((m) => m.id),
+    ].filter(Boolean); // Remove any undefined values
+
+    console.log("✅ Dynamic fallback list built:", MODEL_FALLBACK_LIST);
+
+    return MODEL_FALLBACK_LIST;
+  } catch (error) {
+    console.error(
+      "⚠️  Failed to fetch models, using default fallback list:",
+      error.message
+    );
+    // Keep the default fallback list defined above
+    return MODEL_FALLBACK_LIST;
+  }
+}
+
+// Helper function to get next model in fallback list
+function getNextModel(currentModel) {
+  const currentIndex = MODEL_FALLBACK_LIST.indexOf(currentModel);
+  if (currentIndex === -1 || currentIndex >= MODEL_FALLBACK_LIST.length - 1) {
+    // If we're at the end of the list or model not found, return null
+    return null;
+  }
+  return MODEL_FALLBACK_LIST[currentIndex + 1];
+}
+
 // WebSocket connection handler
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
@@ -89,14 +183,18 @@ io.on("connection", (socket) => {
 
       const { messages, model, tools = [] } = data;
 
-      // Always use the most reliable model for tool usage
-      const groqModel = "llama-3.3-70b-versatile";
+      // Start with the best model, or use the provided model if it's in our fallback list
+      let currentModel =
+        model && MODEL_FALLBACK_LIST.includes(model)
+          ? model
+          : MODEL_FALLBACK_LIST[0];
 
       console.log("Received WebSocket chat request:", {
         messagesCount: messages.length,
         toolCount: tools.length,
         requestedModel: model,
-        usingModel: groqModel,
+        usingModel: currentModel,
+        fallbackList: MODEL_FALLBACK_LIST,
       });
 
       // Clean messages to only include role and content (Groq doesn't support id/timestamp)
@@ -106,7 +204,7 @@ io.on("connection", (socket) => {
       }));
 
       const requestBody = {
-        model: groqModel,
+        model: currentModel,
         messages: cleanMessages,
         ...LLM_CONFIG,
       };
@@ -124,7 +222,7 @@ io.on("connection", (socket) => {
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
       }
 
-      const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+      let response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,12 +231,11 @@ io.on("connection", (socket) => {
         body: JSON.stringify(requestBody),
       });
 
+      // Handle rate limiting with smart retry
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Groq API error response:", response.status, errorText);
-
-        // Handle rate limiting with smart retry
         if (response.status === 429) {
+          const errorText = await response.text();
+          console.error("Groq API error response:", response.status, errorText);
           let errorData;
           try {
             errorData = JSON.parse(errorText);
@@ -146,156 +243,28 @@ io.on("connection", (socket) => {
             errorData = { error: { message: errorText } };
           }
 
-          // Parse retry time from error message
-          const retryMatch = errorData.error?.message?.match(
-            /try again in (\d+)m(\d+(?:\.\d+)?)s/
-          );
-          let retryAfterSeconds = 60; // Default to 60 seconds if we can't parse
+          // Try to switch to next model in fallback list
+          const nextModel = getNextModel(currentModel);
 
-          if (retryMatch) {
-            const minutes = parseInt(retryMatch[1]);
-            const seconds = parseFloat(retryMatch[2]);
-            retryAfterSeconds = minutes * 60 + seconds;
-          }
-
-          // Emit rate limit info to client
-          socket.emit("rate_limit", {
-            retryAfter: retryAfterSeconds,
-            message: errorData.error?.message,
-            limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
-            used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
-            requested: errorData.error?.message?.match(/Requested (\d+)/)?.[1],
-          });
-
-          console.log(
-            `Rate limited. Retrying in ${retryAfterSeconds} seconds...`
-          );
-
-          // Wait and retry automatically
-          await new Promise((resolve) =>
-            setTimeout(resolve, retryAfterSeconds * 1000)
-          );
-
-          console.log("Retrying request after rate limit wait...");
-
-          // Retry the request
-          const retryResponse = await fetch(
-            `${LLM_BASE_URL}/chat/completions`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${LLM_API_KEY}`,
-              },
-              body: JSON.stringify(requestBody),
-            }
-          );
-
-          if (!retryResponse.ok) {
-            const retryErrorText = await retryResponse.text();
-            console.error(
-              "Retry failed:",
-              retryResponse.status,
-              retryErrorText
-            );
-            throw new Error(
-              `Retry failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`
-            );
-          }
-
-          // Use retry response instead
-          const retryData = await retryResponse.json();
-          socket.emit("retry_success", {
-            message: "Request succeeded after rate limit wait",
-          });
-
-          // Continue with normal flow using retry response
-          const aiMessage = retryData.choices[0].message;
-          console.log("Retry successful, processing response...");
-
-          // Process the successful retry response
-          const toolResponses = [];
-
-          if (aiMessage.tool_calls) {
-            console.log("Tool calls:", JSON.stringify(aiMessage.tool_calls));
-            for (const toolCall of aiMessage.tool_calls) {
-              if (toolCall.function.name === "update_dynamic_component") {
-                console.log(
-                  "Handling dynamic component update:",
-                  JSON.stringify(toolCall)
-                );
-
-                try {
-                  let args;
-                  try {
-                    args = JSON.parse(toolCall.function.arguments);
-                  } catch (parseError) {
-                    console.log(
-                      "Initial JSON parse failed, attempting to repair:",
-                      parseError.message
-                    );
-                    let repairedArgs = toolCall.function.arguments
-                      .replace(/\\'/g, "'")
-                      .replace(/\n/g, "\\n")
-                      .replace(/\\\\n/g, "\\n");
-
-                    try {
-                      args = JSON.parse(repairedArgs);
-                      console.log("JSON repair successful");
-                    } catch (repairError) {
-                      console.error("JSON repair failed:", repairError.message);
-                      socket.emit("chat_error", {
-                        error: "Tool use failed due to JSON formatting",
-                        details: `The generated JSX code contains characters that break JSON encoding. Please simplify the component and avoid complex text with quotes or special characters. Error: ${repairError.message}`,
-                        retry: true,
-                      });
-                      return;
-                    }
-                  }
-
-                  console.log("Emitting dynamic component update:", args);
-                  socket.emit("dynamic_component_update", {
-                    code: args.code,
-                    toolCallId: toolCall.id,
-                  });
-
-                  toolResponses.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    name: toolCall.function.name,
-                    content:
-                      "Dynamic component successfully created and rendered",
-                  });
-                } catch (parseError) {
-                  console.error("Error parsing dynamic component:", parseError);
-                }
-              }
-            }
-          }
-
-          if (toolResponses.length > 0) {
+          if (nextModel) {
             console.log(
-              "Making follow-up call to LLM with tool responses:",
-              toolResponses
+              `Rate limited on ${currentModel}. Switching to fallback model: ${nextModel}`
             );
 
-            const followUpMessages = [
-              ...cleanMessages,
-              {
-                role: "assistant",
-                content: aiMessage.content || "",
-                tool_calls: aiMessage.tool_calls,
-              },
-              ...toolResponses,
-            ];
+            // Update the request body with new model
+            requestBody.model = nextModel;
+            currentModel = nextModel;
 
-            const followUpRequestBody = {
-              model: groqModel,
-              messages: followUpMessages,
-              ...LLM_CONFIG,
-            };
+            // Emit model switch info to client
+            socket.emit("rate_limit", {
+              retryAfter: 0,
+              message: `Switching to fallback model: ${nextModel}`,
+              currentModel: nextModel,
+              switchedModel: true,
+            });
 
-            const followUpResponse = await fetch(
+            // Retry immediately with new model
+            const retryResponse = await fetch(
               `${LLM_BASE_URL}/chat/completions`,
               {
                 method: "POST",
@@ -303,41 +272,358 @@ io.on("connection", (socket) => {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${LLM_API_KEY}`,
                 },
-                body: JSON.stringify(followUpRequestBody),
+                body: JSON.stringify(requestBody),
               }
             );
 
-            if (!followUpResponse.ok) {
-              const errorText = await followUpResponse.text();
+            if (!retryResponse.ok) {
+              const retryErrorText = await retryResponse.text();
               console.error(
-                "Groq follow-up API error:",
-                followUpResponse.status,
-                errorText
+                "Fallback model failed:",
+                retryResponse.status,
+                retryErrorText
+              );
+
+              // If fallback also hits rate limit, try the next one recursively
+              if (retryResponse.status === 429) {
+                let retryErrorData;
+                try {
+                  retryErrorData = JSON.parse(retryErrorText);
+                } catch (e) {
+                  retryErrorData = { error: { message: retryErrorText } };
+                }
+
+                const nextNextModel = getNextModel(nextModel);
+                if (nextNextModel) {
+                  console.log(
+                    `Fallback ${nextModel} also rate limited. Trying ${nextNextModel}`
+                  );
+                  requestBody.model = nextNextModel;
+                  currentModel = nextNextModel;
+
+                  socket.emit("rate_limit", {
+                    retryAfter: 0,
+                    message: `Switching to fallback model: ${nextNextModel}`,
+                    currentModel: nextNextModel,
+                    switchedModel: true,
+                  });
+
+                  const finalRetryResponse = await fetch(
+                    `${LLM_BASE_URL}/chat/completions`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${LLM_API_KEY}`,
+                      },
+                      body: JSON.stringify(requestBody),
+                    }
+                  );
+
+                  if (!finalRetryResponse.ok) {
+                    const finalErrorText = await finalRetryResponse.text();
+                    let finalErrorData;
+                    try {
+                      finalErrorData = JSON.parse(finalErrorText);
+                    } catch (e) {
+                      finalErrorData = { error: { message: finalErrorText } };
+                    }
+
+                    // All models exhausted - collect wait times
+                    const waitTimes = [];
+
+                    // Parse wait times from all error messages
+                    for (const errData of [
+                      errorData,
+                      retryErrorData,
+                      finalErrorData,
+                    ]) {
+                      const retryMatch = errData.error?.message?.match(
+                        /try again in (\d+)m(\d+(?:\.\d+)?)s/
+                      );
+                      if (retryMatch) {
+                        const minutes = parseInt(retryMatch[1]);
+                        const seconds = parseFloat(retryMatch[2]);
+                        waitTimes.push(minutes * 60 + seconds);
+                      }
+                    }
+
+                    const minWait =
+                      waitTimes.length > 0 ? Math.min(...waitTimes) : 60;
+                    const maxWait =
+                      waitTimes.length > 0 ? Math.max(...waitTimes) : 60;
+
+                    const formatTime = (seconds) => {
+                      const mins = Math.floor(seconds / 60);
+                      const secs = Math.floor(seconds % 60);
+                      return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                    };
+
+                    socket.emit("chat_error", {
+                      error: "All models are currently rate-limited",
+                      details: `All available models have hit their rate limits. Please try again in ${formatTime(
+                        minWait
+                      )}${
+                        maxWait > minWait ? ` to ${formatTime(maxWait)}` : ""
+                      }.`,
+                      retryAfter: minWait,
+                    });
+                    return;
+                  }
+
+                  const finalRetryData = await finalRetryResponse.json();
+                  socket.emit("retry_success", {
+                    message: `Request succeeded with fallback model: ${nextNextModel}`,
+                    modelUsed: nextNextModel,
+                  });
+
+                  const aiMessage = finalRetryData.choices[0].message;
+                  // Continue with processing (code will fall through to normal flow)
+                  const retryData = finalRetryData;
+                } else {
+                  // Parse wait time from the second fallback's error
+                  const retryMatch = retryErrorData.error?.message?.match(
+                    /try again in (\d+)m(\d+(?:\.\d+)?)s/
+                  );
+                  let retrySeconds = 60;
+                  if (retryMatch) {
+                    const minutes = parseInt(retryMatch[1]);
+                    const seconds = parseFloat(retryMatch[2]);
+                    retrySeconds = minutes * 60 + seconds;
+                  }
+
+                  const formatTime = (seconds) => {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = Math.floor(seconds % 60);
+                    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                  };
+
+                  socket.emit("chat_error", {
+                    error: "All models are currently rate-limited",
+                    details: `All available fallback models have hit their rate limits. Please try again in approximately ${formatTime(
+                      retrySeconds
+                    )}.`,
+                    retryAfter: retrySeconds,
+                  });
+                  return;
+                }
+              } else {
+                throw new Error(
+                  `Fallback model failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`
+                );
+              }
+            } else {
+              console.log("Fallback model response received:", {
+                model: nextModel,
+                hasContent: !!retryResponse.ok,
+              });
+
+              socket.emit("retry_success", {
+                message: `Request succeeded with fallback model: ${nextModel}`,
+                modelUsed: nextModel,
+              });
+
+              // Use the retry response for normal processing
+              response = retryResponse;
+            }
+          } else {
+            // No more fallback models, wait for rate limit to clear
+            const retryMatch = errorData.error?.message?.match(
+              /try again in (\d+)m(\d+(?:\.\d+)?)s/
+            );
+            let retryAfterSeconds = 60;
+
+            if (retryMatch) {
+              const minutes = parseInt(retryMatch[1]);
+              const seconds = parseFloat(retryMatch[2]);
+              retryAfterSeconds = minutes * 60 + seconds;
+            }
+
+            socket.emit("rate_limit", {
+              retryAfter: retryAfterSeconds,
+              message: errorData.error?.message,
+              limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
+              used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
+              requested:
+                errorData.error?.message?.match(/Requested (\d+)/)?.[1],
+            });
+
+            console.log(
+              `Rate limited on all models. Waiting ${retryAfterSeconds} seconds...`
+            );
+
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryAfterSeconds * 1000)
+            );
+
+            console.log("Retrying request after rate limit wait...");
+
+            const retryResponse = await fetch(
+              `${LLM_BASE_URL}/chat/completions`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${LLM_API_KEY}`,
+                },
+                body: JSON.stringify(requestBody),
+              }
+            );
+
+            if (!retryResponse.ok) {
+              const retryErrorText = await retryResponse.text();
+              console.error(
+                "Final retry failed:",
+                retryResponse.status,
+                retryErrorText
               );
               throw new Error(
-                `Follow-up API error: ${followUpResponse.status} ${followUpResponse.statusText} - ${errorText}`
+                `Final retry failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`
               );
             }
 
-            const followUpData = await followUpResponse.json();
-            const finalMessage = followUpData.choices[0].message;
+            const retryData = await retryResponse.json();
+            socket.emit("retry_success", {
+              message: "Request succeeded after rate limit wait",
+            });
 
-            socket.emit("chat_response", {
-              content: finalMessage.content || "",
-              tool_calls: [],
-            });
-          } else {
-            socket.emit("chat_response", {
-              content: aiMessage.content || "",
-              tool_calls: aiMessage.tool_calls || [],
-            });
+            const aiMessage = retryData.choices[0].message;
+            console.log("Retry successful, processing response...");
+
+            // Process the successful retry response
+            const toolResponses = [];
+
+            if (aiMessage.tool_calls) {
+              console.log("Tool calls:", JSON.stringify(aiMessage.tool_calls));
+              for (const toolCall of aiMessage.tool_calls) {
+                if (toolCall.function.name === "update_dynamic_component") {
+                  console.log(
+                    "Handling dynamic component update:",
+                    JSON.stringify(toolCall)
+                  );
+
+                  try {
+                    let args;
+                    try {
+                      args = JSON.parse(toolCall.function.arguments);
+                    } catch (parseError) {
+                      console.log(
+                        "Initial JSON parse failed, attempting to repair:",
+                        parseError.message
+                      );
+                      let repairedArgs = toolCall.function.arguments
+                        .replace(/\\'/g, "'")
+                        .replace(/\n/g, "\\n")
+                        .replace(/\\\\n/g, "\\n");
+
+                      try {
+                        args = JSON.parse(repairedArgs);
+                        console.log("JSON repair successful");
+                      } catch (repairError) {
+                        console.error(
+                          "JSON repair failed:",
+                          repairError.message
+                        );
+                        socket.emit("chat_error", {
+                          error: "Tool use failed due to JSON formatting",
+                          details: `The generated JSX code contains characters that break JSON encoding. Please simplify the component and avoid complex text with quotes or special characters. Error: ${repairError.message}`,
+                          retry: true,
+                        });
+                        return;
+                      }
+                    }
+
+                    console.log("Emitting dynamic component update:", args);
+                    socket.emit("dynamic_component_update", {
+                      code: args.code,
+                      toolCallId: toolCall.id,
+                    });
+
+                    toolResponses.push({
+                      role: "tool",
+                      tool_call_id: toolCall.id,
+                      name: toolCall.function.name,
+                      content:
+                        "Dynamic component successfully created and rendered",
+                    });
+                  } catch (parseError) {
+                    console.error(
+                      "Error parsing dynamic component:",
+                      parseError
+                    );
+                  }
+                }
+              }
+            }
+
+            if (toolResponses.length > 0) {
+              console.log(
+                "Making follow-up call to LLM with tool responses:",
+                toolResponses
+              );
+
+              const followUpMessages = [
+                ...cleanMessages,
+                {
+                  role: "assistant",
+                  content: aiMessage.content || "",
+                  tool_calls: aiMessage.tool_calls,
+                },
+                ...toolResponses,
+              ];
+
+              const followUpRequestBody = {
+                model: currentModel,
+                messages: followUpMessages,
+                ...LLM_CONFIG,
+              };
+
+              const followUpResponse = await fetch(
+                `${LLM_BASE_URL}/chat/completions`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${LLM_API_KEY}`,
+                  },
+                  body: JSON.stringify(followUpRequestBody),
+                }
+              );
+
+              if (!followUpResponse.ok) {
+                const errorText = await followUpResponse.text();
+                console.error(
+                  "Groq follow-up API error:",
+                  followUpResponse.status,
+                  errorText
+                );
+                throw new Error(
+                  `Follow-up API error: ${followUpResponse.status} ${followUpResponse.statusText} - ${errorText}`
+                );
+              }
+
+              const followUpData = await followUpResponse.json();
+              const finalMessage = followUpData.choices[0].message;
+
+              socket.emit("chat_response", {
+                content: finalMessage.content || "",
+                tool_calls: [],
+              });
+            } else {
+              socket.emit("chat_response", {
+                content: aiMessage.content || "",
+                tool_calls: aiMessage.tool_calls || [],
+              });
+            }
+            return; // Exit after successful retry
           }
-          return; // Exit after successful retry
+        } else {
+          // Non-429 error
+          const errorText = await response.text();
+          throw new Error(
+            `API error: ${response.status} ${response.statusText} - ${errorText}`
+          );
         }
-
-        throw new Error(
-          `API error: ${response.status} ${response.statusText} - ${errorText}`
-        );
       }
 
       const responseData = await response.json();
@@ -407,10 +693,11 @@ io.on("connection", (socket) => {
 
               console.log("Emitting dynamic component update:", args);
 
-              // Emit the dynamic component code back to the client
+              // Emit the dynamic component code back to the client with model name
               socket.emit("dynamic_component_update", {
                 code: args.code,
                 toolCallId: toolCall.id,
+                modelName: currentModel,
               });
 
               // Add tool response for LLM continuation
@@ -446,7 +733,7 @@ io.on("connection", (socket) => {
         ];
 
         const followUpRequestBody = {
-          model: groqModel,
+          model: currentModel,
           messages: followUpMessages,
           ...LLM_CONFIG,
         };
@@ -476,7 +763,7 @@ io.on("connection", (socket) => {
             errorText
           );
 
-          // Handle rate limiting in follow-up call
+          // Handle rate limiting in follow-up call with model fallback
           if (followUpResponse.status === 429) {
             let errorData;
             try {
@@ -485,77 +772,133 @@ io.on("connection", (socket) => {
               errorData = { error: { message: errorText } };
             }
 
-            // Parse retry time from error message
-            const retryMatch = errorData.error?.message?.match(
-              /try again in (\d+)m(\d+(?:\.\d+)?)s/
-            );
-            let retryAfterSeconds = 60; // Default to 60 seconds if we can't parse
+            // Try to switch to next model in fallback list
+            const nextModel = getNextModel(currentModel);
 
-            if (retryMatch) {
-              const minutes = parseInt(retryMatch[1]);
-              const seconds = parseFloat(retryMatch[2]);
-              retryAfterSeconds = minutes * 60 + seconds;
-            }
+            if (nextModel) {
+              console.log(
+                `Follow-up call rate limited on ${currentModel}. Switching to fallback model: ${nextModel}`
+              );
 
-            // Emit rate limit info to client
-            socket.emit("rate_limit", {
-              retryAfter: retryAfterSeconds,
-              message: errorData.error?.message,
-              limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
-              used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
-              requested:
-                errorData.error?.message?.match(/Requested (\d+)/)?.[1],
-            });
+              followUpRequestBody.model = nextModel;
+              currentModel = nextModel;
 
-            console.log(
-              `Follow-up call rate limited. Retrying in ${retryAfterSeconds} seconds...`
-            );
+              socket.emit("rate_limit", {
+                retryAfter: 0,
+                message: `Follow-up switching to fallback model: ${nextModel}`,
+                currentModel: nextModel,
+                switchedModel: true,
+              });
 
-            // Wait and retry automatically
-            await new Promise((resolve) =>
-              setTimeout(resolve, retryAfterSeconds * 1000)
-            );
+              // Retry with fallback model
+              const retryFollowUpResponse = await fetch(
+                `${LLM_BASE_URL}/chat/completions`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${LLM_API_KEY}`,
+                  },
+                  body: JSON.stringify(followUpRequestBody),
+                }
+              );
 
-            console.log("Retrying follow-up request after rate limit wait...");
-
-            // Retry the follow-up request
-            const retryFollowUpResponse = await fetch(
-              `${LLM_BASE_URL}/chat/completions`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${LLM_API_KEY}`,
-                },
-                body: JSON.stringify(followUpRequestBody),
+              if (!retryFollowUpResponse.ok) {
+                const retryErrorText = await retryFollowUpResponse.text();
+                console.error(
+                  "Follow-up fallback failed:",
+                  retryFollowUpResponse.status,
+                  retryErrorText
+                );
+                throw new Error(
+                  `Follow-up fallback failed: ${retryFollowUpResponse.status} ${retryFollowUpResponse.statusText}`
+                );
               }
-            );
 
-            if (!retryFollowUpResponse.ok) {
-              const retryErrorText = await retryFollowUpResponse.text();
-              console.error(
-                "Follow-up retry failed:",
-                retryFollowUpResponse.status,
-                retryErrorText
+              const retryFollowUpData = await retryFollowUpResponse.json();
+              socket.emit("retry_success", {
+                message: `Follow-up request succeeded with fallback model: ${nextModel}`,
+                modelUsed: nextModel,
+              });
+
+              const finalMessage = retryFollowUpData.choices[0].message;
+
+              socket.emit("chat_response", {
+                content: finalMessage.content || "",
+                tool_calls: [],
+              });
+              return;
+            } else {
+              // No more fallback models, wait for rate limit
+              const retryMatch = errorData.error?.message?.match(
+                /try again in (\d+)m(\d+(?:\.\d+)?)s/
               );
-              throw new Error(
-                `Follow-up retry failed: ${retryFollowUpResponse.status} ${retryFollowUpResponse.statusText} - ${retryErrorText}`
+              let retryAfterSeconds = 60;
+
+              if (retryMatch) {
+                const minutes = parseInt(retryMatch[1]);
+                const seconds = parseFloat(retryMatch[2]);
+                retryAfterSeconds = minutes * 60 + seconds;
+              }
+
+              socket.emit("rate_limit", {
+                retryAfter: retryAfterSeconds,
+                message: errorData.error?.message,
+                limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
+                used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
+                requested:
+                  errorData.error?.message?.match(/Requested (\d+)/)?.[1],
+              });
+
+              console.log(
+                `Follow-up call rate limited. Waiting ${retryAfterSeconds} seconds...`
               );
+
+              await new Promise((resolve) =>
+                setTimeout(resolve, retryAfterSeconds * 1000)
+              );
+
+              console.log(
+                "Retrying follow-up request after rate limit wait..."
+              );
+
+              const retryFollowUpResponse = await fetch(
+                `${LLM_BASE_URL}/chat/completions`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${LLM_API_KEY}`,
+                  },
+                  body: JSON.stringify(followUpRequestBody),
+                }
+              );
+
+              if (!retryFollowUpResponse.ok) {
+                const retryErrorText = await retryFollowUpResponse.text();
+                console.error(
+                  "Follow-up retry failed:",
+                  retryFollowUpResponse.status,
+                  retryErrorText
+                );
+                throw new Error(
+                  `Follow-up retry failed: ${retryFollowUpResponse.status} ${retryFollowUpResponse.statusText}`
+                );
+              }
+
+              const retryFollowUpData = await retryFollowUpResponse.json();
+              socket.emit("retry_success", {
+                message: "Follow-up request succeeded after rate limit wait",
+              });
+
+              const finalMessage = retryFollowUpData.choices[0].message;
+
+              socket.emit("chat_response", {
+                content: finalMessage.content || "",
+                tool_calls: [],
+              });
+              return;
             }
-
-            // Use retry response instead
-            const retryFollowUpData = await retryFollowUpResponse.json();
-            socket.emit("retry_success", {
-              message: "Follow-up request succeeded after rate limit wait",
-            });
-
-            const finalMessage = retryFollowUpData.choices[0].message;
-
-            socket.emit("chat_response", {
-              content: finalMessage.content || "",
-              tool_calls: [],
-            });
-            return; // Exit after successful retry
           }
 
           throw new Error(
@@ -665,6 +1008,9 @@ app.get("/api/models", async (req, res) => {
   }
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Pathweaver server running on http://localhost:${PORT}`);
+// Initialize model fallback list before starting server
+initializeModelFallbackList().then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`Pathweaver server running on http://localhost:${PORT}`);
+  });
 });

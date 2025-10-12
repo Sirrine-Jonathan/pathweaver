@@ -153,7 +153,17 @@ const TOOL_DEFINITIONS = [
 export class LLMService {
   private static socket: SocketIOClient.Socket | null = null;
   private static conversationHistory: ChatMessage[] = [];
-  private static rateLimitCallback: ((seconds: number) => void) | null = null;
+  private static rateLimitCallback:
+    | ((
+        seconds: number,
+        info?: {
+          model?: string;
+          switchedModel?: boolean;
+          retryModel?: string;
+          message?: string;
+        }
+      ) => void)
+    | null = null;
 
   private static getSocket(): SocketIOClient.Socket | null {
     if (!this.socket) {
@@ -192,7 +202,17 @@ export class LLMService {
     }, 1000);
   }
 
-  static setRateLimitCallback(callback: (seconds: number) => void) {
+  static setRateLimitCallback(
+    callback: (
+      seconds: number,
+      info?: {
+        model?: string;
+        switchedModel?: boolean;
+        retryModel?: string;
+        message?: string;
+      }
+    ) => void
+  ) {
     this.rateLimitCallback = callback;
   }
 
@@ -208,7 +228,7 @@ export class LLMService {
   static async generateResponse(
     messages: ChatMessage[],
     config: LLMConfig,
-    onDynamicComponentUpdate?: (code: string) => void,
+    onDynamicComponentUpdate?: (code: string, modelName?: string) => void,
     onError?: (error: Error | null) => void
   ): Promise<string> {
     console.log("LLMService.generateResponse called with:", {
@@ -240,22 +260,12 @@ export class LLMService {
       const handleResponse = (data: any) => {
         console.log("Received chat response:", data);
 
-        // Add assistant response to history, but filter out [TOOL_CALL] mentions and component code
+        // Add assistant response to history, but filter out [TOOL_CALL] mentions
         if (data.content) {
           const cleanContent = data.content
             .replace(/\[TOOL_CALL\]\s*update_dynamic_component/g, "")
-            // Remove onClick handlers that may leak through
-            .replace(/onClick=\{[^}]*\}>/g, "")
-            // Remove onEvent calls that may leak through
-            .replace(/onEvent\([^)]*\)[^>]*>/g, "")
-            // Remove any remaining JSX fragments
-            .replace(/<button[^>]*>/gi, "")
-            .replace(/<\/button>/gi, "")
-            .replace(/<div[^>]*>/gi, "")
-            .replace(/<\/div>/gi, "")
-            // Clean up any double spaces left by replacements
-            .replace(/\s+/g, " ")
             .trim();
+
           if (cleanContent) {
             this.addToHistory({
               id: Date.now().toString(),
@@ -265,15 +275,8 @@ export class LLMService {
             });
 
             // Auto-read the narrative text if TTS is enabled
-            // Only read if it's actual narrative content (not just tool calls or system messages)
-            // Filter out any remaining tool call mentions before speaking
-            const textToSpeak = cleanContent
-              .replace(/\[TOOL_CALL\][^\]]*$/g, "")
-              .replace(/update_dynamic_component/g, "")
-              .trim();
-
-            if (textToSpeak.length > 0) {
-              ttsService.speak(textToSpeak);
+            if (cleanContent.length > 0) {
+              ttsService.speak(cleanContent);
             }
           }
         }
@@ -284,23 +287,41 @@ export class LLMService {
 
       const handleRateLimit = (data: any) => {
         console.log("Rate limit received:", data);
-        const { retryAfter, message, limit, used, requested } = data;
+        const {
+          retryAfter,
+          message,
+          limit,
+          used,
+          requested,
+          switchedModel,
+          currentModel,
+        } = data;
+
+        // Prepare rate limit info
+        const rateLimitInfo = {
+          model: currentModel,
+          switchedModel: switchedModel,
+          retryModel: currentModel,
+          message: message,
+        };
 
         // Start countdown in UI
-        if (this.rateLimitCallback && retryAfter) {
+        if (this.rateLimitCallback && retryAfter !== undefined) {
           let countdown = Math.ceil(retryAfter);
-          this.rateLimitCallback(countdown);
+          this.rateLimitCallback(countdown, rateLimitInfo);
 
-          const timer = setInterval(() => {
-            countdown--;
-            if (this.rateLimitCallback) {
-              this.rateLimitCallback(countdown);
-            }
+          if (countdown > 0) {
+            const timer = setInterval(() => {
+              countdown--;
+              if (this.rateLimitCallback) {
+                this.rateLimitCallback(countdown, rateLimitInfo);
+              }
 
-            if (countdown <= 0) {
-              clearInterval(timer);
-            }
-          }, 1000);
+              if (countdown <= 0) {
+                clearInterval(timer);
+              }
+            }, 1000);
+          }
         }
 
         // Server will automatically retry, so we just wait for retry_success or response
@@ -308,9 +329,22 @@ export class LLMService {
 
       const handleRetrySuccess = (data: any) => {
         console.log("Retry successful:", data);
-        // Clear countdown
+        const { modelUsed, message } = data;
+
+        // Clear countdown and show success briefly
         if (this.rateLimitCallback) {
-          this.rateLimitCallback(0);
+          this.rateLimitCallback(0, {
+            model: modelUsed,
+            switchedModel: false,
+            message: message,
+          });
+
+          // Clear the message after a short delay
+          setTimeout(() => {
+            if (this.rateLimitCallback) {
+              this.rateLimitCallback(0);
+            }
+          }, 2000);
         }
         // Server will emit the response next, so we don't need to do anything here
       };
@@ -355,7 +389,7 @@ export class LLMService {
       const handleDynamicUpdate = (data: any) => {
         console.log("Received dynamic component update:", data);
         if (onDynamicComponentUpdate && data.code) {
-          onDynamicComponentUpdate(data.code);
+          onDynamicComponentUpdate(data.code, data.modelName);
 
           // Add tool call to history for context
           this.addToHistory({

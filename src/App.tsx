@@ -24,7 +24,14 @@ function App() {
   const [dynamicComponentCode, setDynamicComponentCode] = useState<
     string | null
   >(null);
+  const [currentModelName, setCurrentModelName] = useState<string | null>(null);
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    model?: string;
+    switchedModel?: boolean;
+    retryModel?: string;
+    message?: string;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -80,13 +87,29 @@ function App() {
     }
 
     // Set up rate limit callback
-    LLMService.setRateLimitCallback(setRateLimitCountdown);
+    LLMService.setRateLimitCallback((countdown, info) => {
+      setRateLimitCountdown(countdown);
+      if (info) {
+        setRateLimitInfo(info);
+      }
+      if (countdown === 0) {
+        setRateLimitInfo(null);
+      }
+    });
   }, []);
 
   // Handle dynamic component updates
-  const handleDynamicComponentUpdate = (code: string) => {
-    console.log("Updating dynamic component with code:", code);
+  const handleDynamicComponentUpdate = (code: string, modelName?: string) => {
+    console.log(
+      "Updating dynamic component with code:",
+      code,
+      "from model:",
+      modelName
+    );
     setDynamicComponentCode(code);
+    if (modelName) {
+      setCurrentModelName(modelName);
+    }
     setError(null);
   };
 
@@ -97,6 +120,25 @@ function App() {
       message = error.message;
     } else if (typeof error === "string") {
       message = error;
+    } else if (typeof error === "object" && error !== null) {
+      // Handle error objects from the server (e.g., rate limit errors)
+      const errorObj = error as {
+        error?: string;
+        details?: string;
+        message?: string;
+      };
+      if (errorObj.details) {
+        // If we have details, show both error and details
+        message = errorObj.error
+          ? `${errorObj.error}: ${errorObj.details}`
+          : errorObj.details;
+      } else if (errorObj.error) {
+        message = errorObj.error;
+      } else if (errorObj.message) {
+        message = errorObj.message;
+      } else {
+        message = "An unknown error occurred";
+      }
     } else {
       message = "An unknown error occurred";
     }
@@ -384,53 +426,98 @@ function App() {
 
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Dynamic Component Area - Takes full space */}
-          <div className="flex-1 min-h-0 overflow-auto relative">
-            {!gameStarted ? (
-              <div className="flex-1 h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
-                <div className="text-center p-8">
-                  <h1 className="text-4xl font-bold text-gray-800 mb-4">
-                    Pathweaver
-                  </h1>
-                  <p className="text-xl text-gray-600 mb-8">
-                    Interactive AI Storytelling Adventure
-                  </p>
-                  <button
-                    onClick={handleStartGame}
-                    className="px-8 py-4 bg-blue-600 text-white text-lg font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Start Adventure
-                  </button>
+          <div className="flex-1 min-h-0">
+            <div className="relative h-full">
+              {!gameStarted ? (
+                <div className="flex-1 h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
+                  <div className="text-center p-8">
+                    <h1 className="text-4xl font-bold text-gray-800 mb-4">
+                      Pathweaver
+                    </h1>
+                    <p className="text-xl text-gray-600 mb-8">
+                      Interactive AI Storytelling Adventure
+                    </p>
+                    <button
+                      onClick={handleStartGame}
+                      className="px-8 py-4 bg-blue-600 text-white text-lg font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Start Adventure
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <DynamicComponent
-                onEvent={handleDynamicEvent}
-                componentString={dynamicComponentCode || ""}
-              />
-            )}
-            {error && (
-              <div className="bg-red-500 text-white translate-x-[-50%] left-[50%] p-2 px-5 mx-auto max-content absolute bottom-5 rounded-md">
-                Error - Please try again
-                <br />
-                {error}
-              </div>
-            )}
+              ) : (
+                <DynamicComponent
+                  onEvent={handleDynamicEvent}
+                  componentString={dynamicComponentCode || ""}
+                />
+              )}
+              {error && (
+                <div className="bg-red-500 text-white translate-x-[-50%] left-[50%] p-2 px-5 mx-auto max-content absolute bottom-5 rounded-md">
+                  Error - Please try again
+                  <br />
+                  {error}
+                </div>
+              )}
+              {currentModelName && (
+                <div className="absolute bottom-0 bg-slate-200 right-0 px-6 py-1 rounded-tl-lg opacity-80 text-xs text-gray-500 pointer-events-none">
+                  {currentModelName}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Captions/Status Area - Between dynamic component and chat */}
           {gameStarted && (
             <>
-              {/* Rate limit countdown */}
-              {rateLimitCountdown > 0 ? (
-                <div className="w-full bg-orange-50 border-t border-orange-200">
-                  <div className="p-4 flex items-center justify-center space-x-3 text-orange-700">
-                    <div className="animate-pulse rounded-full h-4 w-4 bg-orange-500"></div>
+              {/* Rate limit / Model switch status */}
+              {rateLimitCountdown > 0 || rateLimitInfo ? (
+                <div
+                  className={`w-full border-t ${
+                    rateLimitInfo?.switchedModel
+                      ? "bg-blue-50 border-blue-200"
+                      : "bg-orange-50 border-orange-200"
+                  }`}
+                >
+                  <div
+                    className={`p-4 flex items-center justify-center space-x-3 ${
+                      rateLimitInfo?.switchedModel
+                        ? "text-blue-700"
+                        : "text-orange-700"
+                    }`}
+                  >
+                    <div
+                      className={`rounded-full h-4 w-4 ${
+                        rateLimitInfo?.switchedModel
+                          ? "bg-blue-500 animate-spin border-2 border-blue-200 border-t-transparent"
+                          : "bg-orange-500 animate-pulse"
+                      }`}
+                    ></div>
                     <div className="text-center">
-                      <span className="font-semibold">Rate Limited</span>
-                      <span className="text-sm ml-2">
-                        Retrying in {Math.floor(rateLimitCountdown / 60)}m{" "}
-                        {rateLimitCountdown % 60}s
-                      </span>
+                      {rateLimitInfo?.switchedModel ? (
+                        <>
+                          <span className="font-semibold">
+                            Switching Models
+                          </span>
+                          <span className="text-sm ml-2 block sm:inline">
+                            Using{" "}
+                            {rateLimitInfo.retryModel || rateLimitInfo.model}{" "}
+                            instead
+                          </span>
+                        </>
+                      ) : rateLimitCountdown > 0 ? (
+                        <>
+                          <span className="font-semibold">Rate Limited</span>
+                          {rateLimitInfo?.model && (
+                            <span className="text-xs block sm:inline sm:ml-2">
+                              ({rateLimitInfo.model})
+                            </span>
+                          )}
+                          <span className="text-sm ml-2 block sm:inline">
+                            Retrying in {Math.floor(rateLimitCountdown / 60)}m{" "}
+                            {rateLimitCountdown % 60}s
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>

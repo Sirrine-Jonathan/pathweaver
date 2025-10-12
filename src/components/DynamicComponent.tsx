@@ -48,6 +48,21 @@ class DynamicComponentErrorBoundary extends React.Component<
   }
 }
 
+export function FloatingOrb() {
+  return (
+    <div className="flex-1 h-full w-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
+      <div className="flex flex-col items-center">
+        <div className="relative flex-shrink-0 scale-150">
+          {/* Ethereal floating orb */}
+          <div className="w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-purple-400 via-blue-500 to-indigo-600 rounded-full shadow-lg animate-[pulse_10s_ease-in-out_infinite]"></div>
+          <div className="absolute inset-0 w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-purple-300 via-blue-400 to-indigo-500 rounded-full opacity-60 animate-[ping_15s_ease-in-out_infinite]"></div>
+          <div className="absolute inset-1 w-10 h-10 md:w-12 md:h-12 bg-white rounded-full opacity-20"></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * This is the entry point for AI-authored game UI.
  * The AI can create interactive game elements here.
@@ -124,18 +139,15 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({
   // Fallback to default component if transpilation fails
   if (error) {
     return (
-      <div className="flex-1 h-full w-full flex items-center justify-center bg-red-50">
-        <div className="text-center p-8 bg-red-100 rounded-lg">
-          <div className="text-6xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-bold text-red-800 mb-4">
-            Dynamic Component Error
-          </h1>
-          <p className="text-red-600 mb-6">{error}</p>
-          <pre className="text-xs text-red-500 bg-red-50 p-2 rounded max-w-md overflow-auto">
-            {componentString}
-          </pre>
-        </div>
-      </div>
+      // <div className="flex-1 h-full w-full flex items-center justify-center bg-red-100">
+      //   <div className="text-center p-8 rounded-lg">
+      //     <h1 className="text-2xl font-bold text-red-800 mb-4">
+      //       Dynamic Component Error
+      //     </h1>
+      //     <p className="text-red-600 mb-6 text-xl">transpilation failed</p>
+      //   </div>
+      // </div>
+      <FloatingOrb />
     );
   }
 
@@ -159,9 +171,9 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({
   // Render the transpiled component within an error boundary
   return (
     <DynamicComponentErrorBoundary>
-      <div className="ai-dynamic-content h-full">
+      <div className="ai-dynamic-content h-full overflow-y-auto">
         <TranspiledComponent onEvent={onEvent} />
-        {error && <div className="text-red-500 absolute">{error}</div>}
+        {error && <FloatingOrb />}
       </div>
     </DynamicComponentErrorBoundary>
   );
