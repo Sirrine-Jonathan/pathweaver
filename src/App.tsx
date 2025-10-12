@@ -4,9 +4,11 @@ import DynamicComponent from "./components/DynamicComponent";
 import InstallPrompt from "./components/InstallPrompt";
 import Settings from "./components/Settings";
 import Captions from "./components/Captions";
-import { LLMConfig } from "./types";
+import StorySidebar from "./components/StorySidebar";
+import { LLMConfig, ChatMessage } from "./types";
 import { LLMService } from "./services/llm";
 import { ttsService } from "./services/tts";
+import { storyManager } from "./services/storyManager";
 
 const DEFAULT_CONFIG: LLMConfig = {
   baseUrl: "http://localhost:8080",
@@ -30,6 +32,15 @@ function App() {
   const [ttsSettings, setTTSSettings] = useState(ttsService.getSettings());
   const [currentSpeechText, setCurrentSpeechText] = useState("");
   const [hasReplayAvailable, setHasReplayAvailable] = useState(false);
+
+  // Story management state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Open by default
+  const [currentStoryId, setCurrentStoryId] = useState<string | null>(null);
+  const [lastUserMessage, setLastUserMessage] = useState<ChatMessage | null>(
+    null
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [storySidebarKey, setStorySidebarKey] = useState(0); // Force refresh
 
   // Set up TTS callbacks for captions
   useEffect(() => {
@@ -109,6 +120,9 @@ function App() {
   // Start the game
   const handleStartGame = () => {
     setGameStarted(true);
+    // Create a new story
+    const story = storyManager.createNewStory();
+    setCurrentStoryId(story.id);
     // Automatically send initial message to start the adventure
     setTimeout(() => {
       if (chatRef.current) {
@@ -120,54 +134,121 @@ function App() {
     }, 100);
   };
 
+  // Handle new story creation
+  const handleNewStory = () => {
+    const story = storyManager.createNewStory();
+    setCurrentStoryId(story.id);
+    setGameStarted(true);
+    setDynamicComponentCode(null);
+    setError(null);
+    // Automatically send initial message to start the new adventure
+    setTimeout(() => {
+      if (chatRef.current) {
+        chatRef.current.sendEventMessage(
+          "Hello! I'd like to start a new adventure.",
+          true
+        );
+      }
+    }, 100);
+  };
+
+  // Handle loading a story
+  const handleLoadStory = async (storyId: string, stepNumber?: number) => {
+    try {
+      const story = await storyManager.loadStory(storyId, stepNumber);
+      setCurrentStoryId(story.id);
+      setGameStarted(true);
+
+      // Load the component code from the current step if it exists
+      const currentStep = story.steps[story.currentStep - 1];
+      if (currentStep?.componentCode) {
+        setDynamicComponentCode(currentStep.componentCode);
+      } else {
+        setDynamicComponentCode(null);
+      }
+
+      setError(null);
+      setIsSidebarOpen(false);
+    } catch (error) {
+      console.error("Failed to load story:", error);
+      setError("Failed to load story");
+    }
+  };
+
+  // Handle deleting a story
+  const handleDeleteStory = async (storyId: string) => {
+    try {
+      await storyManager.deleteStory(storyId);
+
+      // If we deleted the current story, reset
+      if (storyId === currentStoryId) {
+        setCurrentStoryId(null);
+        setGameStarted(false);
+        setDynamicComponentCode(null);
+      }
+    } catch (error) {
+      console.error("Failed to delete story:", error);
+      setError("Failed to delete story");
+    }
+  };
+
+  // Auto-save after AI responses
+  const handleAIResponse = async (
+    aiMessage: ChatMessage,
+    componentCode?: string
+  ) => {
+    if (lastUserMessage && currentStoryId) {
+      setIsSaving(true);
+      try {
+        await storyManager.addStep(lastUserMessage, aiMessage, componentCode);
+        setLastUserMessage(null); // Clear after saving
+        // Force sidebar to refresh
+        setStorySidebarKey((prev) => prev + 1);
+      } catch (error) {
+        console.error("Failed to save story step:", error);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+  };
+
   return (
-    <div className="h-screen bg-gray-50 flex">
+    <div className="h-screen bg-gray-50 flex overflow-hidden">
       {/* Main Dynamic Component Area */}
-      <div className={`flex-1 flex flex-col`}>
-        <header className="bg-white border-b p-4 flex justify-between items-center">
-          <div className="flex items-center space-x-3">
-            <div className="relative">
+      <div className={`flex-1 flex flex-col min-w-0`}>
+        <header className="bg-white border-b p-3 md:p-4 flex justify-between items-center flex-shrink-0">
+          <div className="flex items-center space-x-2 md:space-x-3 min-w-0 flex-1">
+            <div className="relative flex-shrink-0">
               {/* Ethereal floating orb */}
-              <div className="w-8 h-8 bg-gradient-to-br from-purple-400 via-blue-500 to-indigo-600 rounded-full shadow-lg animate-[pulse_10s_ease-in-out_infinite]"></div>
-              <div className="absolute inset-0 w-8 h-8 bg-gradient-to-br from-purple-300 via-blue-400 to-indigo-500 rounded-full opacity-60 animate-[ping_15s_ease-in-out_infinite]"></div>
-              <div className="absolute inset-1 w-6 h-6 bg-white rounded-full opacity-20"></div>
+              <div className="w-6 h-6 md:w-8 md:h-8 bg-gradient-to-br from-purple-400 via-blue-500 to-indigo-600 rounded-full shadow-lg animate-[pulse_10s_ease-in-out_infinite]"></div>
+              <div className="absolute inset-0 w-6 h-6 md:w-8 md:h-8 bg-gradient-to-br from-purple-300 via-blue-400 to-indigo-500 rounded-full opacity-60 animate-[ping_15s_ease-in-out_infinite]"></div>
+              <div className="absolute inset-1 w-4 h-4 md:w-6 md:h-6 bg-white rounded-full opacity-20"></div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Pathweaver</h1>
-              <p className="text-gray-600 text-sm">
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-2xl font-bold text-gray-900 truncate">
+                Pathweaver
+              </h1>
+              <p className="text-gray-600 text-xs md:text-sm hidden sm:block">
                 Interactive AI Storytelling
               </p>
             </div>
           </div>
 
           {/* Right side of header */}
-          <div className="flex items-center space-x-4">
-            {/* Loading indicator or rate limit countdown */}
-            {gameStarted && (
-              <>
-                {rateLimitCountdown > 0 ? (
-                  <div className="flex items-center space-x-2 text-orange-600">
-                    <div className="animate-pulse rounded-full h-4 w-4 bg-orange-600"></div>
-                    <span className="text-sm">
-                      Rate limited, retrying in{" "}
-                      {Math.floor(rateLimitCountdown / 60)}m{" "}
-                      {rateLimitCountdown % 60}s...
-                    </span>
-                  </div>
-                ) : isLoading ? (
-                  <div className="flex items-center space-x-2 text-blue-600">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span className="text-sm">Thinking...</span>
-                  </div>
-                ) : null}
-              </>
+          <div className="flex items-center space-x-1 md:space-x-4 flex-shrink-0">
+            {/* Saving indicator - hidden on small screens */}
+            {gameStarted && isSaving && (
+              <div className="hidden sm:flex items-center space-x-2 text-green-600">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-green-600"></div>
+                <span className="text-xs">Saving...</span>
+              </div>
             )}
 
             {/* TTS Controls - Only show when enabled */}
             {ttsSettings.enabled && (
               <>
-                {/* Rate Control */}
-                <div className="flex items-center space-x-2">
+                {/* Rate Control - hidden on mobile */}
+                <div className="hidden lg:flex items-center space-x-2">
                   <button
                     type="button"
                     className={`text-sm text-gray-600 ${
@@ -208,11 +289,11 @@ function App() {
                   </span>
                 </div>
 
-                {/* Skip/Play Button */}
+                {/* Skip/Play Button - compact on mobile */}
                 {isSpeaking ? (
                   <button
                     onClick={() => ttsService.stop()}
-                    className="px-3 py-1 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-1"
+                    className="px-2 py-1 md:px-3 md:py-1 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-1"
                     title="Skip narration"
                   >
                     <svg
@@ -223,12 +304,12 @@ function App() {
                     >
                       <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" />
                     </svg>
-                    <span>Skip</span>
+                    <span className="hidden md:inline">Skip</span>
                   </button>
                 ) : hasReplayAvailable ? (
                   <button
                     onClick={() => ttsService.replay()}
-                    className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-1"
+                    className="px-2 py-1 md:px-3 md:py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-1"
                     title="Replay narration"
                   >
                     <svg
@@ -243,7 +324,7 @@ function App() {
                         clipRule="evenodd"
                       />
                     </svg>
-                    <span>Play</span>
+                    <span className="hidden md:inline">Play</span>
                   </button>
                 ) : null}
               </>
@@ -252,12 +333,12 @@ function App() {
             {/* Settings Button */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-1.5 md:p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
               title="Settings"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6 text-gray-600"
+                className="h-5 w-5 md:h-6 md:w-6 text-gray-600"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -276,12 +357,34 @@ function App() {
                 />
               </svg>
             </button>
+
+            {/* Stories Sidebar Toggle Button */}
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-1.5 md:p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+              title="Toggle stories sidebar"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 md:h-6 md:w-6 text-gray-600"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col min-h-0">
+        <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Dynamic Component Area - Takes full space */}
-          <div className="flex-1 min-h-0 overflow-y-auto relative">
+          <div className="flex-1 min-h-0 overflow-auto relative">
             {!gameStarted ? (
               <div className="flex-1 h-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
                 <div className="text-center p-8">
@@ -314,14 +417,40 @@ function App() {
             )}
           </div>
 
-          {/* Captions Area - Between dynamic component and chat */}
+          {/* Captions/Status Area - Between dynamic component and chat */}
           {gameStarted && (
-            <Captions
-              text={currentSpeechText}
-              isVisible={
-                ttsSettings.enabled && ttsSettings.showCaptions && isSpeaking
-              }
-            />
+            <>
+              {/* Rate limit countdown */}
+              {rateLimitCountdown > 0 ? (
+                <div className="w-full bg-orange-50 border-t border-orange-200">
+                  <div className="p-4 flex items-center justify-center space-x-3 text-orange-700">
+                    <div className="animate-pulse rounded-full h-4 w-4 bg-orange-500"></div>
+                    <div className="text-center">
+                      <span className="font-semibold">Rate Limited</span>
+                      <span className="text-sm ml-2">
+                        Retrying in {Math.floor(rateLimitCountdown / 60)}m{" "}
+                        {rateLimitCountdown % 60}s
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : ttsSettings.enabled &&
+                ttsSettings.showCaptions &&
+                isSpeaking ? (
+                /* Captions */
+                <Captions text={currentSpeechText} isVisible={true} />
+              ) : isLoading ? (
+                /* Thinking indicator */
+                <div className="w-full bg-blue-50 border-t border-blue-200">
+                  <div className="p-4 flex items-center justify-center space-x-3 text-blue-600">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <div className="text-center">
+                      <span className="font-semibold">Thinking...</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
 
           {/* Message Input - Fixed at bottom */}
@@ -333,11 +462,24 @@ function App() {
                 onDynamicComponentUpdate={handleDynamicComponentUpdate}
                 onError={handleError}
                 onLoadingChange={setIsLoading}
+                onUserMessage={setLastUserMessage}
+                onAIResponse={handleAIResponse}
               />
             </div>
           )}
         </main>
       </div>
+
+      {/* Story Sidebar - Right side */}
+      <StorySidebar
+        key={storySidebarKey}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        currentStoryId={currentStoryId}
+        onLoadStory={handleLoadStory}
+        onNewStory={handleNewStory}
+        onDeleteStory={handleDeleteStory}
+      />
 
       <InstallPrompt />
       <Settings

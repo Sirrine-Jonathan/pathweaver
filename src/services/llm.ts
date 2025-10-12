@@ -1,5 +1,5 @@
 import { ChatMessage, LLMConfig } from "../types";
-import { io as InternetSocket } from "socket.io-client";
+import io from "socket.io-client";
 import { ttsService } from "./tts";
 
 const GAME_MASTER_PROMPT = `You are a master storyteller running an immersive interactive adventure game (aim for 20-30 total interactions for a rich experience).
@@ -12,6 +12,8 @@ CRITICAL RULES:
 5. Use the update_dynamic_component tool ONLY when you need to create a new interactive interface
 6. You can respond with just text to narrate story progression - you don't always need to create components
 7. CRITICAL: When using tools, ensure your JSON is properly formatted with escaped quotes and no unescaped newlines
+8. NEVER include component code (JSX, onClick, onEvent, etc.) in your text responses - only use the tool for components
+9. Text responses should ONLY contain narrative prose - no code fragments, no JSX, no button syntax
 
 UI/UX REQUIREMENTS:
 8. NEVER attempt to use images, icons, or visual assets - they are not supported and will break the interface
@@ -126,15 +128,19 @@ const TOOL_DEFINITIONS = [
               "     );\\n" +
               "   }\\n" +
               "7. CRITICAL: When using tools, ensure your JSON is properly formatted with escaped quotes and no unescaped newlines\\n" +
-              "8. AVOID quotes in JSX text content - use single words or apostrophes instead of double quotes\\n" +
-              "9. Example: Use 'Welcome to the Realm of Wonder' instead of 'Welcome to \"Realm of Wonder\"'\\n" +
-              "10. ALWAYS use 'w-full h-full' classes on your root div to fill the container completely\\n" +
-              "9. NEVER use images, img tags, or attempt to load visual assets - use text, emojis, or ASCII art instead\\n" +
-              "10. ALWAYS provide interactive elements (buttons/choices/controls) when user input is needed\\n" +
-              "11. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
-              "12. Example button spacing: <div className='flex flex-col justify-end space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
-              "13. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX\\n" +
-              "14. AVOID double quotes in JSX text - use single quotes or no quotes to prevent JSON parsing errors\\n" +
+              "8. TEXT CONTENT RULES - CRITICAL FOR JSON ENCODING:\\n" +
+              "   - NEVER use apostrophes in JSX text (e.g., don't, it's, rogue's)\\n" +
+              "   - Use simple words without contractions or possessives\\n" +
+              "   - WRONG: 'The Rogue\\'s Lair' or 'Don\\'t go there'\\n" +
+              "   - RIGHT: 'The Rogue Lair' or 'Do not go there'\\n" +
+              "   - NEVER use quote marks in text content\\n" +
+              "   - Keep all text simple and clean to avoid JSON encoding issues\\n" +
+              "9. ALWAYS use 'w-full h-full' classes on your root div to fill the container completely\\n" +
+              "10. NEVER use images, img tags, or attempt to load visual assets - use text, emojis, or ASCII art instead\\n" +
+              "11. ALWAYS provide interactive elements (buttons/choices/controls) when user input is needed\\n" +
+              "12. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
+              "13. Example button spacing: <div className='flex flex-col justify-end space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
+              "14. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX\\n" +
               "15. ALWAYS style your component for mobile responsiveness (mobile first!)",
           },
         },
@@ -157,7 +163,7 @@ export class LLMService {
           ? window.location.origin
           : "http://localhost:8080";
       console.log("Connecting to WebSocket at:", socketUrl);
-      this.socket = InternetSocket(socketUrl);
+      this.socket = io(socketUrl);
     }
     return this.socket;
   }
@@ -190,7 +196,7 @@ export class LLMService {
     this.rateLimitCallback = callback;
   }
 
-  private static addToHistory(message: ChatMessage) {
+  static addToHistory(message: ChatMessage) {
     this.conversationHistory.push(message);
 
     // Keep only last 20 messages to prevent context overflow
@@ -234,10 +240,21 @@ export class LLMService {
       const handleResponse = (data: any) => {
         console.log("Received chat response:", data);
 
-        // Add assistant response to history, but filter out [TOOL_CALL] mentions
+        // Add assistant response to history, but filter out [TOOL_CALL] mentions and component code
         if (data.content) {
           const cleanContent = data.content
             .replace(/\[TOOL_CALL\]\s*update_dynamic_component/g, "")
+            // Remove onClick handlers that may leak through
+            .replace(/onClick=\{[^}]*\}>/g, "")
+            // Remove onEvent calls that may leak through
+            .replace(/onEvent\([^)]*\)[^>]*>/g, "")
+            // Remove any remaining JSX fragments
+            .replace(/<button[^>]*>/gi, "")
+            .replace(/<\/button>/gi, "")
+            .replace(/<div[^>]*>/gi, "")
+            .replace(/<\/div>/gi, "")
+            // Clean up any double spaces left by replacements
+            .replace(/\s+/g, " ")
             .trim();
           if (cleanContent) {
             this.addToHistory({
@@ -265,65 +282,45 @@ export class LLMService {
         cleanup();
       };
 
+      const handleRateLimit = (data: any) => {
+        console.log("Rate limit received:", data);
+        const { retryAfter, message, limit, used, requested } = data;
+
+        // Start countdown in UI
+        if (this.rateLimitCallback && retryAfter) {
+          let countdown = Math.ceil(retryAfter);
+          this.rateLimitCallback(countdown);
+
+          const timer = setInterval(() => {
+            countdown--;
+            if (this.rateLimitCallback) {
+              this.rateLimitCallback(countdown);
+            }
+
+            if (countdown <= 0) {
+              clearInterval(timer);
+            }
+          }, 1000);
+        }
+
+        // Server will automatically retry, so we just wait for retry_success or response
+      };
+
+      const handleRetrySuccess = (data: any) => {
+        console.log("Retry successful:", data);
+        // Clear countdown
+        if (this.rateLimitCallback) {
+          this.rateLimitCallback(0);
+        }
+        // Server will emit the response next, so we don't need to do anything here
+      };
+
       const handleError = (error: any) => {
         console.error("Chat error:", error);
         socket?.emit("chat_error", {
           error,
         });
         onError?.(error);
-
-        // Check for rate limit error - look for both the code and the retry time
-        if (
-          error.details &&
-          (error.details.includes("rate_limit_exceeded") ||
-            error.details.includes("Rate limit reached"))
-        ) {
-          // Extract retry time from error message - handle both seconds and minutes
-          let retrySeconds = 0;
-
-          // Try to match minutes and seconds format: "15m3.939999999s"
-          const minutesMatch = error.details.match(
-            /Please try again in (\d+)m([\d.]+)s/
-          );
-          if (minutesMatch) {
-            const minutes = parseInt(minutesMatch[1]);
-            const seconds = parseFloat(minutesMatch[2]);
-            retrySeconds = Math.ceil(minutes * 60 + seconds);
-          } else {
-            // Try to match seconds only format: "4.765s"
-            const secondsMatch = error.details.match(
-              /Please try again in ([\d.]+)s/
-            );
-            if (secondsMatch) {
-              retrySeconds = Math.ceil(parseFloat(secondsMatch[1]));
-            }
-          }
-
-          if (retrySeconds > 0) {
-            console.log(
-              `Rate limited, retrying in ${retrySeconds} seconds (${Math.floor(
-                retrySeconds / 60
-              )}m ${retrySeconds % 60}s)...`
-            );
-
-            // Start countdown and auto-retry
-            this.handleRateLimit(retrySeconds, () => {
-              // Retry the same request
-              const retryMessages = [
-                { role: "system", content: GAME_MASTER_PROMPT },
-                ...this.conversationHistory,
-              ];
-
-              socket?.emit("chat_request", {
-                messages: retryMessages,
-                model: config.model,
-                tools: TOOL_DEFINITIONS,
-                tool_choice: "required",
-              });
-            });
-            return; // Don't reject, let the retry handle it
-          }
-        }
 
         // If it's a retry error, automatically send feedback to LLM
         if (error.retry) {
@@ -374,12 +371,16 @@ export class LLMService {
         socket?.off("chat_response", handleResponse);
         socket?.off("chat_error", handleError);
         socket?.off("dynamic_component_update", handleDynamicUpdate);
+        socket?.off("rate_limit", handleRateLimit);
+        socket?.off("retry_success", handleRetrySuccess);
       };
 
       // Register event listeners
       socket?.on("chat_response", handleResponse);
       socket?.on("chat_error", handleError);
       socket?.on("dynamic_component_update", handleDynamicUpdate);
+      socket?.on("rate_limit", handleRateLimit);
+      socket?.on("retry_success", handleRetrySuccess);
 
       // Send the chat request with full conversation history
       console.log("Emitting chat_request to server...");

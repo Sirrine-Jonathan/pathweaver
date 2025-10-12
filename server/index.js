@@ -137,7 +137,203 @@ io.on("connection", (socket) => {
         const errorText = await response.text();
         console.error("Groq API error response:", response.status, errorText);
 
-        setTimeout();
+        // Handle rate limiting with smart retry
+        if (response.status === 429) {
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch (e) {
+            errorData = { error: { message: errorText } };
+          }
+
+          // Parse retry time from error message
+          const retryMatch = errorData.error?.message?.match(
+            /try again in (\d+)m(\d+(?:\.\d+)?)s/
+          );
+          let retryAfterSeconds = 60; // Default to 60 seconds if we can't parse
+
+          if (retryMatch) {
+            const minutes = parseInt(retryMatch[1]);
+            const seconds = parseFloat(retryMatch[2]);
+            retryAfterSeconds = minutes * 60 + seconds;
+          }
+
+          // Emit rate limit info to client
+          socket.emit("rate_limit", {
+            retryAfter: retryAfterSeconds,
+            message: errorData.error?.message,
+            limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
+            used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
+            requested: errorData.error?.message?.match(/Requested (\d+)/)?.[1],
+          });
+
+          console.log(
+            `Rate limited. Retrying in ${retryAfterSeconds} seconds...`
+          );
+
+          // Wait and retry automatically
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryAfterSeconds * 1000)
+          );
+
+          console.log("Retrying request after rate limit wait...");
+
+          // Retry the request
+          const retryResponse = await fetch(
+            `${LLM_BASE_URL}/chat/completions`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${LLM_API_KEY}`,
+              },
+              body: JSON.stringify(requestBody),
+            }
+          );
+
+          if (!retryResponse.ok) {
+            const retryErrorText = await retryResponse.text();
+            console.error(
+              "Retry failed:",
+              retryResponse.status,
+              retryErrorText
+            );
+            throw new Error(
+              `Retry failed: ${retryResponse.status} ${retryResponse.statusText} - ${retryErrorText}`
+            );
+          }
+
+          // Use retry response instead
+          const retryData = await retryResponse.json();
+          socket.emit("retry_success", {
+            message: "Request succeeded after rate limit wait",
+          });
+
+          // Continue with normal flow using retry response
+          const aiMessage = retryData.choices[0].message;
+          console.log("Retry successful, processing response...");
+
+          // Process the successful retry response
+          const toolResponses = [];
+
+          if (aiMessage.tool_calls) {
+            console.log("Tool calls:", JSON.stringify(aiMessage.tool_calls));
+            for (const toolCall of aiMessage.tool_calls) {
+              if (toolCall.function.name === "update_dynamic_component") {
+                console.log(
+                  "Handling dynamic component update:",
+                  JSON.stringify(toolCall)
+                );
+
+                try {
+                  let args;
+                  try {
+                    args = JSON.parse(toolCall.function.arguments);
+                  } catch (parseError) {
+                    console.log(
+                      "Initial JSON parse failed, attempting to repair:",
+                      parseError.message
+                    );
+                    let repairedArgs = toolCall.function.arguments
+                      .replace(/\\'/g, "'")
+                      .replace(/\n/g, "\\n")
+                      .replace(/\\\\n/g, "\\n");
+
+                    try {
+                      args = JSON.parse(repairedArgs);
+                      console.log("JSON repair successful");
+                    } catch (repairError) {
+                      console.error("JSON repair failed:", repairError.message);
+                      socket.emit("chat_error", {
+                        error: "Tool use failed due to JSON formatting",
+                        details: `The generated JSX code contains characters that break JSON encoding. Please simplify the component and avoid complex text with quotes or special characters. Error: ${repairError.message}`,
+                        retry: true,
+                      });
+                      return;
+                    }
+                  }
+
+                  console.log("Emitting dynamic component update:", args);
+                  socket.emit("dynamic_component_update", {
+                    code: args.code,
+                    toolCallId: toolCall.id,
+                  });
+
+                  toolResponses.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    name: toolCall.function.name,
+                    content:
+                      "Dynamic component successfully created and rendered",
+                  });
+                } catch (parseError) {
+                  console.error("Error parsing dynamic component:", parseError);
+                }
+              }
+            }
+          }
+
+          if (toolResponses.length > 0) {
+            console.log(
+              "Making follow-up call to LLM with tool responses:",
+              toolResponses
+            );
+
+            const followUpMessages = [
+              ...cleanMessages,
+              {
+                role: "assistant",
+                content: aiMessage.content || "",
+                tool_calls: aiMessage.tool_calls,
+              },
+              ...toolResponses,
+            ];
+
+            const followUpRequestBody = {
+              model: groqModel,
+              messages: followUpMessages,
+              ...LLM_CONFIG,
+            };
+
+            const followUpResponse = await fetch(
+              `${LLM_BASE_URL}/chat/completions`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${LLM_API_KEY}`,
+                },
+                body: JSON.stringify(followUpRequestBody),
+              }
+            );
+
+            if (!followUpResponse.ok) {
+              const errorText = await followUpResponse.text();
+              console.error(
+                "Groq follow-up API error:",
+                followUpResponse.status,
+                errorText
+              );
+              throw new Error(
+                `Follow-up API error: ${followUpResponse.status} ${followUpResponse.statusText} - ${errorText}`
+              );
+            }
+
+            const followUpData = await followUpResponse.json();
+            const finalMessage = followUpData.choices[0].message;
+
+            socket.emit("chat_response", {
+              content: finalMessage.content || "",
+              tool_calls: [],
+            });
+          } else {
+            socket.emit("chat_response", {
+              content: aiMessage.content || "",
+              tool_calls: aiMessage.tool_calls || [],
+            });
+          }
+          return; // Exit after successful retry
+        }
 
         throw new Error(
           `API error: ${response.status} ${response.statusText} - ${errorText}`
@@ -178,12 +374,14 @@ io.on("connection", (socket) => {
                   toolCall.function.arguments.substring(0, 100) + "..."
                 );
 
-                // More targeted JSON repair - only fix unescaped quotes in content
+                // More targeted JSON repair - fix escaped quotes and newlines
                 let repairedArgs = toolCall.function.arguments
-                  // Fix unescaped single quotes in text content (but not in code)
-                  .replace(/([^\\])'([^s])/g, "$1\\'$2") // Don't escape 's contractions
-                  .replace(/([^\\])'s /g, "$1\\'s ") // Fix 's contractions specifically
-                  .replace(/\\n/g, "\\\\n"); // Escape newlines
+                  // Fix incorrectly escaped single quotes that should be literal
+                  .replace(/\\'/g, "'")
+                  // Ensure newlines in the code string are properly escaped
+                  .replace(/\n/g, "\\n")
+                  // Fix any remaining double-escaped newlines
+                  .replace(/\\\\n/g, "\\n");
 
                 console.log(
                   "Repaired args preview:",
@@ -241,7 +439,7 @@ io.on("connection", (socket) => {
           ...cleanMessages,
           {
             role: "assistant",
-            content: aiMessage.content,
+            content: aiMessage.content || "", // Ensure content is never null/undefined
             tool_calls: aiMessage.tool_calls,
           },
           ...toolResponses,
@@ -277,6 +475,89 @@ io.on("connection", (socket) => {
             followUpResponse.status,
             errorText
           );
+
+          // Handle rate limiting in follow-up call
+          if (followUpResponse.status === 429) {
+            let errorData;
+            try {
+              errorData = JSON.parse(errorText);
+            } catch (e) {
+              errorData = { error: { message: errorText } };
+            }
+
+            // Parse retry time from error message
+            const retryMatch = errorData.error?.message?.match(
+              /try again in (\d+)m(\d+(?:\.\d+)?)s/
+            );
+            let retryAfterSeconds = 60; // Default to 60 seconds if we can't parse
+
+            if (retryMatch) {
+              const minutes = parseInt(retryMatch[1]);
+              const seconds = parseFloat(retryMatch[2]);
+              retryAfterSeconds = minutes * 60 + seconds;
+            }
+
+            // Emit rate limit info to client
+            socket.emit("rate_limit", {
+              retryAfter: retryAfterSeconds,
+              message: errorData.error?.message,
+              limit: errorData.error?.message?.match(/Limit (\d+)/)?.[1],
+              used: errorData.error?.message?.match(/Used (\d+)/)?.[1],
+              requested:
+                errorData.error?.message?.match(/Requested (\d+)/)?.[1],
+            });
+
+            console.log(
+              `Follow-up call rate limited. Retrying in ${retryAfterSeconds} seconds...`
+            );
+
+            // Wait and retry automatically
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryAfterSeconds * 1000)
+            );
+
+            console.log("Retrying follow-up request after rate limit wait...");
+
+            // Retry the follow-up request
+            const retryFollowUpResponse = await fetch(
+              `${LLM_BASE_URL}/chat/completions`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${LLM_API_KEY}`,
+                },
+                body: JSON.stringify(followUpRequestBody),
+              }
+            );
+
+            if (!retryFollowUpResponse.ok) {
+              const retryErrorText = await retryFollowUpResponse.text();
+              console.error(
+                "Follow-up retry failed:",
+                retryFollowUpResponse.status,
+                retryErrorText
+              );
+              throw new Error(
+                `Follow-up retry failed: ${retryFollowUpResponse.status} ${retryFollowUpResponse.statusText} - ${retryErrorText}`
+              );
+            }
+
+            // Use retry response instead
+            const retryFollowUpData = await retryFollowUpResponse.json();
+            socket.emit("retry_success", {
+              message: "Follow-up request succeeded after rate limit wait",
+            });
+
+            const finalMessage = retryFollowUpData.choices[0].message;
+
+            socket.emit("chat_response", {
+              content: finalMessage.content || "",
+              tool_calls: [],
+            });
+            return; // Exit after successful retry
+          }
+
           throw new Error(
             `Follow-up API error: ${followUpResponse.status} ${followUpResponse.statusText} - ${errorText}`
           );

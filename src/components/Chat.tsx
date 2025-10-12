@@ -8,22 +8,54 @@ import React, {
 import { LLMService } from "../services/llm";
 import { ChatMessage, LLMConfig } from "../types";
 import { ttsService } from "../services/tts";
+import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 
 interface ChatProps {
   config: LLMConfig;
   onDynamicComponentUpdate: (code: string) => void;
   onLoadingChange: (loading: boolean) => void;
   onError: (error: Error | null) => void;
+  onUserMessage?: (message: ChatMessage) => void;
+  onAIResponse?: (message: ChatMessage, componentCode?: string) => void;
 }
 
 const Chat = forwardRef<any, ChatProps>(
-  ({ config, onDynamicComponentUpdate, onLoadingChange, onError }, ref) => {
+  (
+    {
+      config,
+      onDynamicComponentUpdate,
+      onLoadingChange,
+      onError,
+      onUserMessage,
+      onAIResponse,
+    },
+    ref
+  ) => {
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [lastMessage, setLastMessage] = useState<string | null>(null);
 
     const lastMessageRef = useRef<HTMLDivElement>(null);
+
+    const {
+      isListening,
+      transcript,
+      isSupported,
+      startListening,
+      stopListening,
+    } = useSpeechRecognition((finalText) => {
+      if (finalText) {
+        handleSendMessage(finalText);
+        setInput("");
+      }
+    });
+
+    useEffect(() => {
+      if (transcript && isListening) {
+        setInput(transcript);
+      }
+    }, [transcript, isListening]);
 
     useImperativeHandle(ref, () => ({
       sendEventMessage: (eventMessage: string, isFirst: boolean = false) => {
@@ -107,15 +139,40 @@ const Chat = forwardRef<any, ChatProps>(
       setIsLoading(true);
       onLoadingChange(true);
 
+      // Notify App.tsx about user message for auto-save
+      if (onUserMessage) {
+        onUserMessage(userMessage);
+      }
+
+      // Track component code from this interaction
+      let componentCodeFromThisResponse: string | undefined;
+      const originalOnDynamicComponentUpdate = onDynamicComponentUpdate;
+      const wrappedOnDynamicComponentUpdate = (code: string) => {
+        componentCodeFromThisResponse = code;
+        originalOnDynamicComponentUpdate(code);
+      };
+
       try {
         console.log("Calling LLMService.generateResponse...");
-        await LLMService.generateResponse(
+        const response = await LLMService.generateResponse(
           newMessages,
           config,
-          onDynamicComponentUpdate,
+          wrappedOnDynamicComponentUpdate,
           onError
         );
         console.log("LLMService.generateResponse completed");
+
+        // Create AI message and notify App.tsx for auto-save
+        const aiMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: response,
+          timestamp: new Date(),
+        };
+
+        if (onAIResponse) {
+          onAIResponse(aiMessage, componentCodeFromThisResponse);
+        }
       } catch (error) {
         console.error("Error sending message:", error);
       } finally {
@@ -131,8 +188,16 @@ const Chat = forwardRef<any, ChatProps>(
       }
     };
 
+    const toggleListening = () => {
+      if (isListening) {
+        stopListening();
+      } else {
+        startListening();
+      }
+    };
+
     return (
-      <div className="flex items-start space-x-2 w-full relative">
+      <div className="flex items-stretch space-x-2 w-full relative">
         <div ref={lastMessageRef} className="absolute">
           {lastMessage && (
             <div className="whitespace-nowrap overflow-hidden text-ellipsis">
@@ -143,18 +208,71 @@ const Chat = forwardRef<any, ChatProps>(
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          name="user-message"
           onKeyPress={handleKeyPress}
-          placeholder="Type your message..."
+          placeholder={isListening ? "Listening..." : "Type your message..."}
           disabled={isLoading}
-          className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 z-10 h-24"
+          className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 z-10 resize-none self-stretch"
         />
-        <button
-          onClick={() => handleSendMessage()}
-          disabled={!input.trim() || isLoading}
-          className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-        >
-          Send
-        </button>
+        <div className="flex flex-col items-stretch gap-2">
+          <button
+            onClick={() => handleSendMessage()}
+            disabled={!input.trim() || isLoading}
+            className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Send
+          </button>
+          {isSupported && (
+            <button
+              onClick={toggleListening}
+              disabled={isLoading}
+              className={`flex justify-center px-4 py-3 rounded-lg transition-colors ${
+                isListening
+                  ? "bg-red-600 hover:bg-red-700"
+                  : "bg-purple-600 hover:bg-purple-700"
+              } text-white disabled:bg-gray-400 disabled:cursor-not-allowed`}
+              title={isListening ? "Stop recording" : "Start recording"}
+            >
+              {isListening ? (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                  />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     );
   }

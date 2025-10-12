@@ -33,3 +33,28 @@ export interface Voice {
   gender: "Male" | "Female";
   locale: string;
 }
+
+export interface StoryStep {
+  stepNumber: number;
+  userMessage: ChatMessage;
+  aiResponse: ChatMessage;
+  componentCode?: string;
+  timestamp: Date;
+}
+
+export interface Story {
+  id: string;
+  title: string;
+  steps: StoryStep[];
+  currentStep: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StorySummary {
+  id: string;
+  title: string;
+  stepCount: number;
+  lastPlayed: Date;
+  preview: string;
+}
