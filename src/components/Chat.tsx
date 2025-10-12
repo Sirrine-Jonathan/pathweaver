@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { LLMService } from "../services/llm";
 import { ChatMessage, LLMConfig } from "../types";
+import { ttsService } from "../services/tts";
 
 interface ChatProps {
   config: LLMConfig;
@@ -84,6 +85,9 @@ const Chat = forwardRef<any, ChatProps>(
     ) => {
       const text = messageText || input.trim();
       if (!text || isLoading) return;
+
+      // Stop any ongoing narration when user sends a message
+      ttsService.stop();
 
       console.log("Sending message to LLM:", { text, config });
       if (!isFirst && !text.includes("[DYNAMIC_EVENT")) {

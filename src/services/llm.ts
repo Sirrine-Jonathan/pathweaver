@@ -1,5 +1,6 @@
 import { ChatMessage, LLMConfig } from "../types";
 import { io as InternetSocket } from "socket.io-client";
+import { ttsService } from "./tts";
 
 const GAME_MASTER_PROMPT = `You are a master storyteller running an immersive interactive adventure game (aim for 20-30 total interactions for a rich experience).
 
@@ -245,6 +246,18 @@ export class LLMService {
               content: cleanContent,
               timestamp: new Date(),
             });
+
+            // Auto-read the narrative text if TTS is enabled
+            // Only read if it's actual narrative content (not just tool calls or system messages)
+            // Filter out any remaining tool call mentions before speaking
+            const textToSpeak = cleanContent
+              .replace(/\[TOOL_CALL\][^\]]*$/g, "")
+              .replace(/update_dynamic_component/g, "")
+              .trim();
+
+            if (textToSpeak.length > 0) {
+              ttsService.speak(textToSpeak);
+            }
           }
         }
 
