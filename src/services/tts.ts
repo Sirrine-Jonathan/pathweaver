@@ -75,19 +75,17 @@ class TTSService {
           enabled: settings.enabled ?? false,
           voice: settings.voice ?? "Google US English Female",
           rate: settings.rate ?? 1.0,
-          showCaptions: settings.showCaptions ?? true,
         };
       }
     } catch (error) {
       console.error("Error loading TTS settings:", error);
     }
 
-    // Default settings - disabled by default
+    // Default settings - disabled by default, use Google male voice
     return {
       enabled: false,
-      voice: "Google US English Female",
+      voice: "Google US English Male",
       rate: 1.0,
-      showCaptions: true,
     };
   }
 
@@ -219,7 +217,7 @@ class TTSService {
     this.onSpeechEndCallback = onEnd || null;
   }
 
-  public speak(text: string): void {
+  public speak(text: string, speechOnly: boolean = false): void {
     if (!this.synth || !this.settings.enabled) {
       return;
     }
@@ -228,8 +226,10 @@ class TTSService {
     this.stop();
 
     // Store original text for callbacks and replay
-    this.currentOriginalText = text;
-    this.lastSpokenText = text;
+    if (!speechOnly) {
+      this.currentOriginalText = text;
+      this.lastSpokenText = text;
+    }
 
     // Clean text for speech
     const cleanText = this.cleanTextForSpeech(text);

@@ -38,6 +38,7 @@ function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsSettings, setTTSSettings] = useState(ttsService.getSettings());
   const [currentSpeechText, setCurrentSpeechText] = useState("");
+  const [lastAIResponseText, setLastAIResponseText] = useState("");
   const [hasReplayAvailable, setHasReplayAvailable] = useState(false);
 
   // Story management state
@@ -239,6 +240,9 @@ function App() {
     aiMessage: ChatMessage,
     componentCode?: string
   ) => {
+    // Update the captions with the AI response text
+    setLastAIResponseText(aiMessage.content);
+
     if (lastUserMessage && currentStoryId) {
       // Verify storyManager actually has the current story loaded
       const currentStory = storyManager.getCurrentStory();
@@ -545,9 +549,10 @@ function App() {
                     </div>
                   </div>
                 </div>
-              ) : ttsSettings.showCaptions ? (
-                <Captions text={currentSpeechText} isVisible={true} />
               ) : null}
+
+              {/* Always show captions with AI response text */}
+              <Captions text={lastAIResponseText} />
             </>
           )}
 

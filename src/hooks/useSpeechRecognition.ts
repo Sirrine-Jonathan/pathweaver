@@ -69,6 +69,13 @@ export const useSpeechRecognition = (
 
       recognition.onresult = (event: any) => {
         console.log("🎯 Speech recognition result received", event);
+
+        // Prevent processing if already completed
+        if (completedRef.current) {
+          console.log("⚠️ Already completed, ignoring result");
+          return;
+        }
+
         let interimTranscript = "";
         let finalTranscript = "";
 
@@ -97,16 +104,27 @@ export const useSpeechRecognition = (
         // Clear existing timeout
         if (silenceTimeoutRef.current) {
           clearTimeout(silenceTimeoutRef.current);
+          silenceTimeoutRef.current = null;
         }
 
         // Set timeout for 2 seconds after any speech
         silenceTimeoutRef.current = setTimeout(() => {
           const finalText = finalTranscriptRef.current.trim();
           console.log("⏰ Silence timeout triggered, finalText:", finalText);
+
+          // Double-check we haven't already completed
           if (finalText && onCompleteRef.current && !completedRef.current) {
             console.log("✅ Calling onComplete with:", finalText);
             completedRef.current = true;
-            recognition.stop();
+
+            // Stop recognition AFTER setting the flag
+            try {
+              recognition.stop();
+            } catch (e) {
+              console.error("Error stopping recognition:", e);
+            }
+
+            // Call onComplete AFTER stopping
             onCompleteRef.current(finalText);
           }
         }, 2000);
@@ -115,22 +133,26 @@ export const useSpeechRecognition = (
       recognition.onend = () => {
         console.log("🛑 Speech recognition ended");
         setIsListening(false);
+
+        // Clear any pending timeouts
         if (silenceTimeoutRef.current) {
           clearTimeout(silenceTimeoutRef.current);
+          silenceTimeoutRef.current = null;
         }
 
-        // Fallback: if we have text but onComplete wasn't called, call it now
-        const finalText = finalTranscriptRef.current.trim();
-        console.log(
-          "🔄 onend fallback check, finalText:",
-          finalText,
-          "completed:",
-          completedRef.current
-        );
-        if (finalText && onCompleteRef.current && !completedRef.current) {
-          console.log("✅ Calling onComplete from fallback with:", finalText);
-          completedRef.current = true;
-          onCompleteRef.current(finalText);
+        // Only use fallback if we haven't already completed
+        // This prevents double-calling when timeout triggers stop()
+        if (!completedRef.current) {
+          const finalText = finalTranscriptRef.current.trim();
+          console.log("🔄 onend fallback check, finalText:", finalText);
+
+          if (finalText && onCompleteRef.current) {
+            console.log("✅ Calling onComplete from fallback with:", finalText);
+            completedRef.current = true;
+            onCompleteRef.current(finalText);
+          }
+        } else {
+          console.log("⏭️ Already completed, skipping onend fallback");
         }
       };
 

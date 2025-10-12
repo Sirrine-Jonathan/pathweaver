@@ -12,7 +12,6 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     enabled: false,
     voice: "Google US English Female",
     rate: 1.0,
-    showCaptions: true,
   });
   const [voices, setVoices] = useState<Voice[]>([]);
   const [maleVoices, setMaleVoices] = useState<Voice[]>([]);
@@ -50,14 +49,11 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     ttsService.saveSettings(newSettings);
   };
 
-  const handleToggleCaptions = () => {
-    const newSettings = { ...settings, showCaptions: !settings.showCaptions };
-    setSettings(newSettings);
-    ttsService.saveSettings(newSettings);
-  };
-
   const handleTestVoice = () => {
-    ttsService.speak("Hello! This is a test of the text-to-speech voice.");
+    ttsService.speak(
+      "Hello! This is a test of the text-to-speech voice.",
+      true
+    );
   };
 
   if (!isOpen) return null;
@@ -166,26 +162,6 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
               <span>1.0x (Normal)</span>
               <span>2.0x (Faster)</span>
             </div>
-          </div>
-
-          {/* Show Captions Toggle */}
-          <div className="flex items-center justify-between">
-            <label className="text-gray-700 font-medium">Show Captions</label>
-            <button
-              onClick={handleToggleCaptions}
-              disabled={!settings.enabled}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                settings.showCaptions && settings.enabled
-                  ? "bg-blue-600"
-                  : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  settings.showCaptions ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
           </div>
 
           {/* Test Voice Button */}

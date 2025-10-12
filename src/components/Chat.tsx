@@ -147,7 +147,7 @@ const Chat = forwardRef<any, ChatProps>(
 
       const newMessages = [...messages, userMessage];
       setMessages(newMessages);
-      setInput("");
+      // Don't clear input yet - wait for successful response
       setIsLoading(true);
       onLoadingChange(true);
 
@@ -188,8 +188,12 @@ const Chat = forwardRef<any, ChatProps>(
         if (onAIResponse) {
           onAIResponse(aiMessage, componentCodeFromThisResponse);
         }
+
+        // Clear input only after successful response
+        setInput("");
       } catch (error) {
         console.error("Error sending message:", error);
+        // Keep input on error so user can retry
       } finally {
         setIsLoading(false);
         onLoadingChange(false);

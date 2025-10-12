@@ -25,7 +25,6 @@ export interface TTSSettings {
   enabled: boolean;
   voice: string;
   rate: number;
-  showCaptions: boolean;
 }
 
 export interface Voice {
