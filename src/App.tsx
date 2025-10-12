@@ -240,6 +240,21 @@ function App() {
     componentCode?: string
   ) => {
     if (lastUserMessage && currentStoryId) {
+      // Verify storyManager actually has the current story loaded
+      const currentStory = storyManager.getCurrentStory();
+      if (!currentStory) {
+        console.warn(
+          "Story ID set but storyManager has no current story. Reloading..."
+        );
+        try {
+          await storyManager.loadStory(currentStoryId);
+        } catch (error) {
+          console.error("Failed to reload story:", error);
+          setError("Failed to reload story for saving");
+          return;
+        }
+      }
+
       setIsSaving(true);
       try {
         await storyManager.addStep(lastUserMessage, aiMessage, componentCode);
@@ -248,6 +263,7 @@ function App() {
         setStorySidebarKey((prev) => prev + 1);
       } catch (error) {
         console.error("Failed to save story step:", error);
+        setError("Failed to save story step");
       } finally {
         setIsSaving(false);
       }
@@ -454,8 +470,6 @@ function App() {
               {error && (
                 <div className="bg-red-500 text-white translate-x-[-50%] left-[50%] p-2 px-5 mx-auto max-content absolute bottom-5 rounded-md">
                   Error - Please try again
-                  <br />
-                  {error}
                 </div>
               )}
               {currentModelName && (
@@ -521,11 +535,6 @@ function App() {
                     </div>
                   </div>
                 </div>
-              ) : ttsSettings.enabled &&
-                ttsSettings.showCaptions &&
-                isSpeaking ? (
-                /* Captions */
-                <Captions text={currentSpeechText} isVisible={true} />
               ) : isLoading ? (
                 /* Thinking indicator */
                 <div className="w-full bg-blue-50 border-t border-blue-200">
@@ -536,6 +545,8 @@ function App() {
                     </div>
                   </div>
                 </div>
+              ) : ttsSettings.showCaptions ? (
+                <Captions text={currentSpeechText} isVisible={true} />
               ) : null}
             </>
           )}

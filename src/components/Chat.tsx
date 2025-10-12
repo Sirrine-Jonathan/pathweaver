@@ -45,14 +45,26 @@ const Chat = forwardRef<any, ChatProps>(
       startListening,
       stopListening,
     } = useSpeechRecognition((finalText) => {
+      console.log(
+        "🎤 useSpeechRecognition onComplete callback called with:",
+        finalText
+      );
       if (finalText) {
+        console.log("✅ Sending message from speech recognition:", finalText);
         handleSendMessage(finalText);
         setInput("");
+      } else {
+        console.warn("⚠️ onComplete called with empty text");
       }
     });
 
     useEffect(() => {
+      console.log("📝 Transcript or isListening changed:", {
+        transcript,
+        isListening,
+      });
       if (transcript && isListening) {
+        console.log("✏️ Setting input to transcript:", transcript);
         setInput(transcript);
       }
     }, [transcript, isListening]);
@@ -192,9 +204,15 @@ const Chat = forwardRef<any, ChatProps>(
     };
 
     const toggleListening = () => {
+      console.log(
+        "🎙️ Toggle listening button clicked, isListening:",
+        isListening
+      );
       if (isListening) {
+        console.log("🛑 Stopping listening...");
         stopListening();
       } else {
+        console.log("▶️ Starting listening...");
         startListening();
       }
     };

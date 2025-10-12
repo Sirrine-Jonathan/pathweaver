@@ -33,15 +33,7 @@ class DynamicComponentErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div
-          className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-          role="alert"
-        >
-          <strong className="font-bold">Dynamic Component Error: </strong>
-          <span className="block sm:inline">{this.state.errorMessage}</span>
-        </div>
-      );
+      return <FloatingOrb />;
     }
 
     return this.props.children;
