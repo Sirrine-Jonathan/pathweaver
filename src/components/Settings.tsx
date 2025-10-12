@@ -14,8 +14,6 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     rate: 1.0,
   });
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [maleVoices, setMaleVoices] = useState<Voice[]>([]);
-  const [femaleVoices, setFemaleVoices] = useState<Voice[]>([]);
 
   useEffect(() => {
     // Load current settings
@@ -25,10 +23,6 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
     // Load available voices
     const availableVoices = ttsService.getAvailableVoices();
     setVoices(availableVoices);
-
-    // Separate into male and female voices
-    setMaleVoices(availableVoices.filter((v) => v.gender === "Male"));
-    setFemaleVoices(availableVoices.filter((v) => v.gender === "Female"));
   }, [isOpen]);
 
   const handleToggleEnabled = () => {
@@ -96,50 +90,19 @@ const Settings = ({ isOpen, onClose }: SettingsProps) => {
             <label className="block text-gray-700 font-medium mb-2">
               Voice Selection
             </label>
-
-            {/* Female Voices */}
-            <div className="mb-3">
-              <p className="text-sm text-gray-600 mb-1">Female Voices</p>
-              <select
-                value={
-                  femaleVoices.find((v) => v.name === settings.voice)
-                    ? settings.voice
-                    : ""
-                }
-                onChange={(e) => handleVoiceChange(e.target.value)}
-                disabled={!settings.enabled}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              >
-                <option value="">Select female voice...</option>
-                {femaleVoices.map((voice) => (
-                  <option key={voice.name} value={voice.name}>
-                    {voice.name} ({voice.locale})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Male Voices */}
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Male Voices</p>
-              <select
-                value={
-                  maleVoices.find((v) => v.name === settings.voice)
-                    ? settings.voice
-                    : ""
-                }
-                onChange={(e) => handleVoiceChange(e.target.value)}
-                disabled={!settings.enabled}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              >
-                <option value="">Select male voice...</option>
-                {maleVoices.map((voice) => (
-                  <option key={voice.name} value={voice.name}>
-                    {voice.name} ({voice.locale})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={settings.voice}
+              onChange={(e) => handleVoiceChange(e.target.value)}
+              disabled={!settings.enabled}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <option value="">Select a voice...</option>
+              {voices.map((voice) => (
+                <option key={voice.name} value={voice.name}>
+                  {voice.name} ({voice.locale}) - {voice.gender}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Speech Rate Control */}

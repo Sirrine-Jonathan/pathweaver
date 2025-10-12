@@ -306,7 +306,7 @@ function App() {
               </div>
             )}
 
-            {/* TTS Controls - Only show when enabled */}
+            {/* TTS Controls - Always show play button, rate control only when auto-read enabled */}
             {ttsSettings.enabled && (
               <>
                 {/* Rate Control - hidden on mobile */}
@@ -350,47 +350,68 @@ function App() {
                     {ttsSettings.rate.toFixed(1)}x
                   </span>
                 </div>
-
-                {/* Skip/Play Button - compact on mobile */}
-                {isSpeaking ? (
-                  <button
-                    onClick={() => ttsService.stop()}
-                    className="px-2 py-1 md:px-3 md:py-1 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-1"
-                    title="Skip narration"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" />
-                    </svg>
-                    <span className="hidden md:inline">Skip</span>
-                  </button>
-                ) : hasReplayAvailable ? (
-                  <button
-                    onClick={() => ttsService.replay()}
-                    className="px-2 py-1 md:px-3 md:py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-1"
-                    title="Replay narration"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="hidden md:inline">Play</span>
-                  </button>
-                ) : null}
               </>
             )}
+
+            {/* Skip/Play Button - Always show when there's content, compact on mobile */}
+            {isSpeaking ? (
+              <button
+                onClick={() => ttsService.stop()}
+                className="px-2 py-1 md:px-3 md:py-1 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-1"
+                title="Skip narration"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" />
+                </svg>
+                <span className="hidden md:inline">Skip</span>
+              </button>
+            ) : lastAIResponseText ? (
+              <button
+                onClick={() => {
+                  // If auto-read is disabled, temporarily enable for manual playback
+                  const wasEnabled = ttsService.getSettings().enabled;
+                  if (!wasEnabled) {
+                    const tempSettings = {
+                      ...ttsService.getSettings(),
+                      enabled: true,
+                    };
+                    ttsService.saveSettings(tempSettings);
+                  }
+                  ttsService.speak(lastAIResponseText);
+                  if (!wasEnabled) {
+                    // Restore the original setting after speech starts
+                    setTimeout(() => {
+                      const restoreSettings = {
+                        ...ttsService.getSettings(),
+                        enabled: false,
+                      };
+                      ttsService.saveSettings(restoreSettings);
+                    }, 100);
+                  }
+                }}
+                className="px-2 py-1 md:px-3 md:py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-1"
+                title="Play narration"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-4 w-4"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <span className="hidden md:inline">Play</span>
+              </button>
+            ) : null}
 
             {/* Settings Button */}
             <button
