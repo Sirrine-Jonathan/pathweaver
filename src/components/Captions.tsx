@@ -3,6 +3,8 @@ interface CaptionsProps {
 }
 
 const Captions = ({ text }: CaptionsProps) => {
+  if (!text) return null;
+
   // Always show captions area, even if empty
   return (
     <div

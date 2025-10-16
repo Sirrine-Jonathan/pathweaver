@@ -1,4 +1,10 @@
-import React, { useState, useEffect, ErrorInfo } from "react";
+import React, {
+  useState,
+  useEffect,
+  ErrorInfo,
+  useRef,
+  ReactNode,
+} from "react";
 import * as Babel from "@babel/standalone";
 
 interface DynamicComponentProps {
@@ -66,6 +72,28 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({
   const [TranspiledComponent, setTranspiledComponent] =
     useState<React.ComponentType<any> | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const dynamicComponentWrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (dynamicComponentWrapperRef.current) {
+      const allButtons =
+        dynamicComponentWrapperRef.current.querySelectorAll("button");
+      for (const button of allButtons) {
+        const buttonParent = button.parentElement;
+        if (buttonParent && buttonParent.classList.contains("flex")) {
+          if (buttonParent.classList.contains("flex-row")) {
+            buttonParent.classList.remove("flex-row");
+          }
+          if (!buttonParent.classList.contains("flex-col")) {
+            buttonParent.classList.add("flex-col");
+          }
+          buttonParent.classList.add("gap-3");
+        }
+        button.style.margin = "0";
+      }
+    }
+  });
 
   useEffect(() => {
     if (!componentString) {
@@ -163,7 +191,10 @@ const DynamicComponent: React.FC<DynamicComponentProps> = ({
   // Render the transpiled component within an error boundary
   return (
     <DynamicComponentErrorBoundary>
-      <div className="ai-dynamic-content h-full overflow-y-auto">
+      <div
+        ref={dynamicComponentWrapperRef}
+        className="ai-dynamic-content h-full overflow-y-auto"
+      >
         <TranspiledComponent onEvent={onEvent} />
         {error && <FloatingOrb />}
       </div>

@@ -122,7 +122,7 @@ const TOOL_DEFINITIONS = [
               "7. Example: const AiDynamicComponent = ({ onEvent }) => {\\n" +
               "     const [state, setState] = React.useState(initialState);\\n" +
               "     return (\\n" +
-              "       <div className='w-full h-full p-6 bg-gray-100 flex flex-col'>\\n" +
+              "       <div className='flex flex-col w-full h-full p-6 bg-gray-100'>\\n" +
               "         <button className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors' onClick={() => onEvent('button_clicked', 'data')}>Click me</button>\\n" +
               "       </div>\\n" +
               "     );\\n" +
@@ -141,7 +141,8 @@ const TOOL_DEFINITIONS = [
               "12. Use proper spacing between buttons: 'space-x-4 space-y-4' for flex layouts, 'gap-4' for grid layouts, or 'mb-4' for individual spacing\\n" +
               "13. Example button spacing: <div className='flex flex-col justify-end space-x-4'><button>Option 1</button><button>Option 2</button></div>\\n" +
               "14. Use hover effects on buttons: 'hover:bg-blue-700 transition-colors' for better UX\\n" +
-              "15. ALWAYS style your component for mobile responsiveness (mobile first!)",
+              "15. ALWAYS style your component for mobile responsiveness (mobile first!)" +
+              "16. ALWAYS wrap button/controls in a column flex box container for better mobile responsiveness",
           },
         },
         required: ["code"],

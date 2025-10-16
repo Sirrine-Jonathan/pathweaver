@@ -497,11 +497,6 @@ function App() {
                   Error - Please try again
                 </div>
               )}
-              {currentModelName && (
-                <div className="absolute bottom-0 bg-slate-200 right-0 px-6 py-1 rounded-tl-lg opacity-80 text-xs text-gray-500 pointer-events-none">
-                  {currentModelName}
-                </div>
-              )}
             </div>
           </div>
 
@@ -574,6 +569,12 @@ function App() {
 
               {/* Always show captions with AI response text */}
               <Captions text={lastAIResponseText} />
+
+              {currentModelName && (
+                <div className="bg-slate-800 text-500-grey text-center p-2 text-xs text-white">
+                  {currentModelName}
+                </div>
+              )}
             </>
           )}
 
