@@ -6,6 +6,7 @@ import React, {
   ReactNode,
 } from "react";
 import * as Babel from "@babel/standalone";
+import Orb, { OrbSize } from "./Orb";
 
 interface DynamicComponentProps {
   onEvent: (event: any) => void;
@@ -50,12 +51,7 @@ export function FloatingOrb() {
   return (
     <div className="flex-1 h-full w-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="flex flex-col items-center">
-        <div className="relative flex-shrink-0 scale-150">
-          {/* Ethereal floating orb */}
-          <div className="w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-purple-400 via-blue-500 to-indigo-600 rounded-full shadow-lg animate-[pulse_10s_ease-in-out_infinite]"></div>
-          <div className="absolute inset-0 w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-purple-300 via-blue-400 to-indigo-500 rounded-full opacity-60 animate-[ping_15s_ease-in-out_infinite]"></div>
-          <div className="absolute inset-1 w-10 h-10 md:w-12 md:h-12 bg-white rounded-full opacity-20"></div>
-        </div>
+        <Orb size={OrbSize.large} />
       </div>
     </div>
   );

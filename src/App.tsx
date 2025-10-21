@@ -32,8 +32,15 @@ function App() {
     retryModel?: string;
     message?: string;
   } | null>(null);
+  const [rateLimitStatus, setRateLimitStatus] = useState<
+    import("./types").RateLimitStatus | null
+  >(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{
+    message: string;
+    canRetry: boolean;
+    retryAction?: () => Promise<void>;
+  } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsSettings, setTTSSettings] = useState(ttsService.getSettings());
@@ -49,6 +56,10 @@ function App() {
   );
   const [isSaving, setIsSaving] = useState(false);
   const [storySidebarKey, setStorySidebarKey] = useState(0); // Force refresh
+
+  const clearError = () => {
+    setError(null);
+  };
 
   // Set up TTS callbacks for captions
   useEffect(() => {
@@ -97,6 +108,11 @@ function App() {
         setRateLimitInfo(null);
       }
     });
+
+    // Set up rate limit status callback
+    LLMService.setRateLimitStatusCallback((status) => {
+      setRateLimitStatus(status);
+    });
   }, []);
 
   // Handle dynamic component updates
@@ -115,6 +131,10 @@ function App() {
   };
 
   const handleError = (error: unknown) => {
+    if (error === null) {
+      clearError();
+      return;
+    }
     console.error("Error in dynamic component:", error);
     let message: string;
     if (error instanceof Error) {
@@ -143,7 +163,23 @@ function App() {
     } else {
       message = "An unknown error occurred";
     }
-    setError(message);
+
+    // Check if we have a pending user message to retry
+    const pendingMessage = storyManager.getPendingUserMessage();
+    const canRetry = !!pendingMessage && !!chatRef.current;
+
+    setError({
+      message,
+      canRetry,
+      retryAction: canRetry
+        ? async () => {
+            setError(null);
+            if (chatRef.current && pendingMessage) {
+              await chatRef.current.retryMessage(pendingMessage);
+            }
+          }
+        : undefined,
+    });
   };
 
   // Handle events from dynamic component
@@ -214,7 +250,10 @@ function App() {
       setIsSidebarOpen(false);
     } catch (error) {
       console.error("Failed to load story:", error);
-      setError("Failed to load story");
+      handleError({
+        error: "Failed to load story",
+        details: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -231,7 +270,10 @@ function App() {
       }
     } catch (error) {
       console.error("Failed to delete story:", error);
-      setError("Failed to delete story");
+      handleError({
+        error: "Failed to delete story",
+        details: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -243,7 +285,10 @@ function App() {
     // Update the captions with the AI response text
     setLastAIResponseText(aiMessage.content);
 
-    if (lastUserMessage && currentStoryId) {
+    // Get the pending user message (stored before AI call)
+    const userMessage = storyManager.getPendingUserMessage() || lastUserMessage;
+
+    if (userMessage && currentStoryId) {
       // Verify storyManager actually has the current story loaded
       const currentStory = storyManager.getCurrentStory();
       if (!currentStory) {
@@ -254,20 +299,26 @@ function App() {
           await storyManager.loadStory(currentStoryId);
         } catch (error) {
           console.error("Failed to reload story:", error);
-          setError("Failed to reload story for saving");
+          handleError({
+            error: "Failed to reload story for saving",
+            details: error instanceof Error ? error.message : String(error),
+          });
           return;
         }
       }
 
       setIsSaving(true);
       try {
-        await storyManager.addStep(lastUserMessage, aiMessage, componentCode);
+        await storyManager.addStep(userMessage, aiMessage, componentCode);
         setLastUserMessage(null); // Clear after saving
         // Force sidebar to refresh
         setStorySidebarKey((prev) => prev + 1);
       } catch (error) {
         console.error("Failed to save story step:", error);
-        setError("Failed to save story step");
+        handleError({
+          error: "Failed to save story step",
+          details: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         setIsSaving(false);
       }
@@ -493,8 +544,42 @@ function App() {
                 />
               )}
               {error && (
-                <div className="bg-red-500 text-white translate-x-[-50%] left-[50%] p-2 px-5 mx-auto max-content absolute bottom-5 rounded-md">
-                  Error - Please try again
+                <div className="bg-red-50 border border-red-200 translate-x-[-50%] left-[50%] p-4 px-6 mx-auto max-w-md absolute bottom-5 rounded-lg shadow-lg">
+                  <div className="flex items-start space-x-3">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-red-800">
+                        {error.message}
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        {error.canRetry && error.retryAction && (
+                          <button
+                            onClick={error.retryAction}
+                            className="text-xs px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                          >
+                            Retry
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setError(null)}
+                          className="text-xs px-3 py-1 border border-red-300 text-red-600 rounded hover:bg-red-100 transition-colors"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -570,9 +655,56 @@ function App() {
               {/* Always show captions with AI response text */}
               <Captions text={lastAIResponseText} />
 
+              {/* Rate Limit Status Display */}
+              {rateLimitStatus && rateLimitStatus.warning && (
+                <div className="bg-yellow-50 border-t border-yellow-200">
+                  <div className="p-3 flex items-center justify-center space-x-2 text-yellow-800">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 flex-shrink-0"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <div className="text-xs text-center">
+                      <span className="font-semibold">API Capacity Low:</span>
+                      <span className="ml-1">
+                        {Math.min(
+                          rateLimitStatus.percentage.requests,
+                          rateLimitStatus.percentage.tokens
+                        ).toFixed(0)}
+                        % remaining
+                      </span>
+                      <span className="hidden sm:inline ml-1 text-yellow-700">
+                        ({rateLimitStatus.remaining.requests}/
+                        {rateLimitStatus.limits.requests} requests,{" "}
+                        {Math.floor(rateLimitStatus.remaining.tokens / 1000)}K/
+                        {Math.floor(rateLimitStatus.limits.tokens / 1000)}K
+                        tokens)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {currentModelName && (
                 <div className="bg-slate-800 text-500-grey text-center p-2 text-xs text-white">
                   {currentModelName}
+                  {rateLimitStatus && !rateLimitStatus.warning && (
+                    <span className="ml-2 text-slate-400">
+                      •{" "}
+                      {Math.min(
+                        rateLimitStatus.percentage.requests,
+                        rateLimitStatus.percentage.tokens
+                      ).toFixed(0)}
+                      % capacity
+                    </span>
+                  )}
                 </div>
               )}
             </>

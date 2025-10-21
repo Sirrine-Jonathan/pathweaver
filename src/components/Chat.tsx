@@ -9,6 +9,7 @@ import { LLMService } from "../services/llm";
 import { ChatMessage, LLMConfig } from "../types";
 import { ttsService } from "../services/tts";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
+import { storyManager } from "../services/storyManager";
 
 interface ChatProps {
   config: LLMConfig;
@@ -72,6 +73,10 @@ const Chat = forwardRef<any, ChatProps>(
     useImperativeHandle(ref, () => ({
       sendEventMessage: (eventMessage: string, isFirst: boolean = false) => {
         handleSendMessage(eventMessage, isFirst);
+      },
+      retryMessage: async (message: ChatMessage) => {
+        console.log("Retrying message:", message);
+        await handleSendMessage(message.content, false);
       },
     }));
 
@@ -151,6 +156,9 @@ const Chat = forwardRef<any, ChatProps>(
       setIsLoading(true);
       onLoadingChange(true);
 
+      // Store pending message immediately (before AI call)
+      storyManager.setPendingUserMessage(userMessage);
+
       // Notify App.tsx about user message for auto-save
       if (onUserMessage) {
         onUserMessage(userMessage);
@@ -191,9 +199,11 @@ const Chat = forwardRef<any, ChatProps>(
 
         // Clear input only after successful response
         setInput("");
+        onError(null); // Clear any previous errors
       } catch (error) {
         console.error("Error sending message:", error);
         // Keep input on error so user can retry
+        // Note: pending message is still stored in storyManager for retry
       } finally {
         setIsLoading(false);
         onLoadingChange(false);

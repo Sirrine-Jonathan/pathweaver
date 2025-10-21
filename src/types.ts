@@ -57,3 +57,24 @@ export interface StorySummary {
   lastPlayed: Date;
   preview: string;
 }
+
+export interface RateLimitStatus {
+  model: string;
+  limits: {
+    requests: number;
+    tokens: number;
+  };
+  remaining: {
+    requests: number;
+    tokens: number;
+  };
+  percentage: {
+    requests: number;
+    tokens: number;
+  };
+  resetTime: {
+    requests: string;
+    tokens: string;
+  };
+  warning: boolean;
+}

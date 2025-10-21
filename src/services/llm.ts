@@ -165,6 +165,9 @@ export class LLMService {
         }
       ) => void)
     | null = null;
+  private static rateLimitStatusCallback:
+    | ((status: import("../types").RateLimitStatus) => void)
+    | null = null;
 
   private static getSocket(): SocketIOClient.Socket | null {
     if (!this.socket) {
@@ -215,6 +218,12 @@ export class LLMService {
     ) => void
   ) {
     this.rateLimitCallback = callback;
+  }
+
+  static setRateLimitStatusCallback(
+    callback: (status: import("../types").RateLimitStatus) => void
+  ) {
+    this.rateLimitStatusCallback = callback;
   }
 
   static addToHistory(message: ChatMessage) {
@@ -328,6 +337,13 @@ export class LLMService {
         // Server will automatically retry, so we just wait for retry_success or response
       };
 
+      const handleRateLimitStatus = (data: any) => {
+        console.log("Rate limit status received:", data);
+        if (this.rateLimitStatusCallback) {
+          this.rateLimitStatusCallback(data);
+        }
+      };
+
       const handleRetrySuccess = (data: any) => {
         console.log("Retry successful:", data);
         const { modelUsed, message } = data;
@@ -352,14 +368,13 @@ export class LLMService {
 
       const handleError = (error: any) => {
         console.error("Chat error:", error);
-        socket?.emit("chat_error", {
-          error,
-        });
-        onError?.(error);
 
         // If it's a retry error, automatically send feedback to LLM
+        // DON'T show error to user - this is an automatic retry
         if (error.retry) {
-          console.log("Retrying with error feedback...");
+          console.log(
+            "Retrying with error feedback (automatic retry - no user error shown)..."
+          );
           // Add error feedback to conversation and retry
           this.addToHistory({
             id: Date.now().toString(),
@@ -383,6 +398,11 @@ export class LLMService {
           return; // Don't reject, let the retry handle it
         }
 
+        // Only show error to user if it's NOT an automatic retry
+        socket?.emit("chat_error", {
+          error,
+        });
+        onError?.(error);
         reject(new Error(error.error || "Unknown error"));
         cleanup();
       };
@@ -407,6 +427,7 @@ export class LLMService {
         socket?.off("chat_error", handleError);
         socket?.off("dynamic_component_update", handleDynamicUpdate);
         socket?.off("rate_limit", handleRateLimit);
+        socket?.off("rate_limit_status", handleRateLimitStatus);
         socket?.off("retry_success", handleRetrySuccess);
       };
 
@@ -415,6 +436,7 @@ export class LLMService {
       socket?.on("chat_error", handleError);
       socket?.on("dynamic_component_update", handleDynamicUpdate);
       socket?.on("rate_limit", handleRateLimit);
+      socket?.on("rate_limit_status", handleRateLimitStatus);
       socket?.on("retry_success", handleRetrySuccess);
 
       // Send the chat request with full conversation history

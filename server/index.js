@@ -231,6 +231,56 @@ io.on("connection", (socket) => {
         body: JSON.stringify(requestBody),
       });
 
+      // Parse and emit rate limit headers if present
+      const rateLimitHeaders = {
+        limitRequests: response.headers.get("x-ratelimit-limit-requests"),
+        limitTokens: response.headers.get("x-ratelimit-limit-tokens"),
+        remainingRequests: response.headers.get(
+          "x-ratelimit-remaining-requests"
+        ),
+        remainingTokens: response.headers.get("x-ratelimit-remaining-tokens"),
+        resetRequests: response.headers.get("x-ratelimit-reset-requests"),
+        resetTokens: response.headers.get("x-ratelimit-reset-tokens"),
+      };
+
+      // Emit rate limit status if we have header data
+      if (
+        rateLimitHeaders.remainingRequests ||
+        rateLimitHeaders.remainingTokens
+      ) {
+        const remainingReqs = parseInt(rateLimitHeaders.remainingRequests) || 0;
+        const limitReqs = parseInt(rateLimitHeaders.limitRequests) || 1;
+        const remainingTokens = parseInt(rateLimitHeaders.remainingTokens) || 0;
+        const limitTokens = parseInt(rateLimitHeaders.limitTokens) || 1;
+
+        const requestsPercentage = (remainingReqs / limitReqs) * 100;
+        const tokensPercentage = (remainingTokens / limitTokens) * 100;
+
+        // Warn when capacity is low (< 20%)
+        const isLowCapacity = requestsPercentage < 20 || tokensPercentage < 20;
+
+        socket.emit("rate_limit_status", {
+          model: currentModel,
+          limits: {
+            requests: limitReqs,
+            tokens: limitTokens,
+          },
+          remaining: {
+            requests: remainingReqs,
+            tokens: remainingTokens,
+          },
+          percentage: {
+            requests: requestsPercentage,
+            tokens: tokensPercentage,
+          },
+          resetTime: {
+            requests: rateLimitHeaders.resetRequests,
+            tokens: rateLimitHeaders.resetTokens,
+          },
+          warning: isLowCapacity,
+        });
+      }
+
       // Handle rate limiting with smart retry
       if (!response.ok) {
         if (response.status === 429) {
@@ -627,6 +677,12 @@ io.on("connection", (socket) => {
       }
 
       const responseData = await response.json();
+
+      // Handle empty or error responses
+      if (!responseData.choices || responseData.choices.length === 0) {
+        throw new Error("No response from AI model");
+      }
+
       const aiMessage = responseData.choices[0].message;
 
       console.log("Groq response:", {
@@ -925,9 +981,51 @@ io.on("connection", (socket) => {
       }
     } catch (error) {
       console.error("Groq WebSocket error:", error);
+
+      // Handle tool_use_failed errors with automatic retry (don't show to user)
+      if (error.message.includes("tool_use_failed")) {
+        console.log(
+          "Tool use failed - emitting retry signal to client for automatic retry"
+        );
+        socket.emit("chat_error", {
+          error: "Tool formatting issue",
+          details: error.message,
+          retry: true,
+        });
+        return;
+      }
+
+      let errorMessage = "Failed to get response from AI";
+      let errorDetails = error.message;
+
+      // Better error messages for common issues
+      if (error.message.includes("400")) {
+        errorMessage = "Invalid request to AI service";
+        errorDetails =
+          "The request format was invalid. This is usually a temporary issue - please try again.";
+      } else if (
+        error.message.includes("401") ||
+        error.message.includes("403")
+      ) {
+        errorMessage = "API authentication failed";
+        errorDetails = "Please check your API key configuration.";
+      } else if (error.message.includes("404")) {
+        errorMessage = "AI model not found";
+        errorDetails =
+          "The requested AI model may not be available. Try using a different model.";
+      } else if (
+        error.message.includes("500") ||
+        error.message.includes("502") ||
+        error.message.includes("503")
+      ) {
+        errorMessage = "AI service temporarily unavailable";
+        errorDetails =
+          "The AI service is experiencing issues. Please try again in a moment.";
+      }
+
       socket.emit("chat_error", {
-        error: "Failed to get response from Groq",
-        details: error.message,
+        error: errorMessage,
+        details: errorDetails,
       });
     }
   });

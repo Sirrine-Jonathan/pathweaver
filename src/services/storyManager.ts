@@ -4,6 +4,7 @@ import { LLMService } from "./llm";
 
 class StoryManager {
   private currentStory: Story | null = null;
+  private pendingUserMessage: ChatMessage | null = null;
 
   // Create a new story
   createNewStory(): Story {
@@ -29,6 +30,21 @@ class StoryManager {
   // Set the current story
   setCurrentStory(story: Story): void {
     this.currentStory = story;
+  }
+
+  // Store pending user message (before AI responds)
+  setPendingUserMessage(message: ChatMessage): void {
+    this.pendingUserMessage = message;
+  }
+
+  // Get pending user message
+  getPendingUserMessage(): ChatMessage | null {
+    return this.pendingUserMessage;
+  }
+
+  // Clear pending user message
+  clearPendingUserMessage(): void {
+    this.pendingUserMessage = null;
   }
 
   // Add a step to the current story
@@ -67,6 +83,9 @@ class StoryManager {
     }
 
     await storageService.saveStory(this.currentStory);
+
+    // Clear pending message after successful save
+    this.clearPendingUserMessage();
   }
 
   // Load a story and optionally jump to a specific step
